@@ -5,7 +5,12 @@ const cloudinary = require("cloudinary");
 const cookieparser = require("cookie-parser");
 const cors = require("cors");
 
-const { PORT } = require("./config/config");
+const {
+  PORT,
+  CLOUDINARY_NAME,
+  CLOUDINARY_API_KEY,
+  CLOUDINARY_API_SECRET,
+} = require("./config/config");
 const connectTodb = require("./dbconnection");
 const { collectionRouter } = require("./routes/collection.route");
 
