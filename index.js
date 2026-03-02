@@ -12,7 +12,9 @@ const {
   CLOUDINARY_API_SECRET,
 } = require("./config/config");
 const connectTodb = require("./dbconnection");
+const { categoryRouter } = require("./routes/category.route");
 const { collectionRouter } = require("./routes/collection.route");
+const { productRouter } = require("./routes/products.route");
 
 const app = express();
 const port = PORT;
@@ -34,7 +36,9 @@ app.get("/", (req, res) => {
   res.send(`<center><h1>Server is Started...</h1></center>`);
 });
 
+app.use("/api/v1/categories", categoryRouter);
 app.use("/api/v1/collections", collectionRouter);
+app.use("/api/v1/products", productRouter);
 
 // admin routes
 // app.use("/api/v1/admin", adminRouter);

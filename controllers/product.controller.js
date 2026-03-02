@@ -18,7 +18,8 @@ const toNumber = (value, fallback = 0) => {
 };
 
 const parseArrayField = (value, defaultValue = []) => {
-  if (value === undefined || value === null || value === "") return defaultValue;
+  if (value === undefined || value === null || value === "")
+    return defaultValue;
   if (Array.isArray(value)) return value;
 
   if (typeof value === "string") {
@@ -34,10 +35,13 @@ const parseArrayField = (value, defaultValue = []) => {
 };
 
 const parseObjectIdArrayField = (value, defaultValue = []) => {
-  if (value === undefined || value === null || value === "") return defaultValue;
+  if (value === undefined || value === null || value === "")
+    return defaultValue;
 
   if (Array.isArray(value)) {
-    return value.filter((item) => typeof item === "string" && item.trim() !== "");
+    return value.filter(
+      (item) => typeof item === "string" && item.trim() !== "",
+    );
   }
 
   if (typeof value === "string") {
@@ -47,7 +51,9 @@ const parseObjectIdArrayField = (value, defaultValue = []) => {
     try {
       const parsed = JSON.parse(trimmedValue);
       if (Array.isArray(parsed)) {
-        return parsed.filter((item) => typeof item === "string" && item.trim() !== "");
+        return parsed.filter(
+          (item) => typeof item === "string" && item.trim() !== "",
+        );
       }
     } catch (error) {
       // If it is not JSON, treat it as a single id value.
@@ -130,7 +136,9 @@ const createProduct = async (req, res) => {
     }
 
     if (offerIds.length) {
-      const existingOffersCount = await Offer.countDocuments({ _id: { $in: offerIds } });
+      const existingOffersCount = await Offer.countDocuments({
+        _id: { $in: offerIds },
+      });
       if (existingOffersCount !== offerIds.length) {
         return res.status(404).json({
           success: false,
@@ -180,7 +188,10 @@ const createProduct = async (req, res) => {
     const normalizedPrice = toNumber(price, 0);
     const normalizedOfferPercent = toNumber(offerpercent, 0);
     const calculatedOfferPrice = Number(
-      (normalizedPrice - (normalizedPrice * normalizedOfferPercent) / 100).toFixed(2),
+      (
+        normalizedPrice -
+        (normalizedPrice * normalizedOfferPercent) / 100
+      ).toFixed(2),
     );
 
     const newProduct = await Product.create({
@@ -293,7 +304,9 @@ const updateProduct = async (req, res) => {
     }
 
     if (offers !== undefined) {
-      if (offerIds.some((offerId) => !mongoose.Types.ObjectId.isValid(offerId))) {
+      if (
+        offerIds.some((offerId) => !mongoose.Types.ObjectId.isValid(offerId))
+      ) {
         return res.status(400).json({
           success: false,
           message: "Invalid offer id in offers array",
@@ -301,7 +314,9 @@ const updateProduct = async (req, res) => {
       }
 
       if (offerIds.length) {
-        const existingOffersCount = await Offer.countDocuments({ _id: { $in: offerIds } });
+        const existingOffersCount = await Offer.countDocuments({
+          _id: { $in: offerIds },
+        });
         if (existingOffersCount !== offerIds.length) {
           return res.status(404).json({
             success: false,
@@ -331,7 +346,9 @@ const updateProduct = async (req, res) => {
         : [];
 
       await Promise.all(
-        existingImagePublicIds.map((publicId) => Cloudinary.v2.uploader.destroy(publicId)),
+        existingImagePublicIds.map((publicId) =>
+          Cloudinary.v2.uploader.destroy(publicId),
+        ),
       );
 
       product.images = uploadedImages;
@@ -361,14 +378,21 @@ const updateProduct = async (req, res) => {
     if (offerpercent !== undefined) {
       product.offerpercent = toNumber(offerpercent, product.offerpercent);
     }
-    if (offerprice !== undefined) product.offerprice = toNumber(offerprice, product.offerprice);
+    if (offerprice !== undefined)
+      product.offerprice = toNumber(offerprice, product.offerprice);
     if (offers !== undefined) product.offers = offerIds;
     if (productReviews !== undefined) {
-      product.productReviews = parseArrayField(productReviews, product.productReviews);
+      product.productReviews = parseArrayField(
+        productReviews,
+        product.productReviews,
+      );
     }
-    if (ratings !== undefined) product.ratings = toNumber(ratings, product.ratings);
-    if (emiAvailable !== undefined) product.emiAvailable = toBoolean(emiAvailable);
-    if (emiStartsAt !== undefined) product.emiStartsAt = toNumber(emiStartsAt, product.emiStartsAt);
+    if (ratings !== undefined)
+      product.ratings = toNumber(ratings, product.ratings);
+    if (emiAvailable !== undefined)
+      product.emiAvailable = toBoolean(emiAvailable);
+    if (emiStartsAt !== undefined)
+      product.emiStartsAt = toNumber(emiStartsAt, product.emiStartsAt);
 
     const updatedProduct = await product.save();
 
