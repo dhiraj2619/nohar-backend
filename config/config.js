@@ -3,6 +3,10 @@ const MONGO_URI = process.env.MONGO_URI;
 const CLOUDINARY_NAME = process.env.CLOUDINARY_NAME;
 const CLOUDINARY_API_KEY = process.env.CLOUDINARY_API_KEY;
 const CLOUDINARY_API_SECRET = process.env.CLOUDINARY_API_SECRET;
+const ADMIN_EMAIL = process.env.ADMIN_EMAIL;
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD;
+const ADMIN_JWT_SECRET = process.env.ADMIN_JWT_SECRET;
+const ADMIN_NAME = process.env.ADMIN_NAME;
 
 module.exports = {
   PORT,
@@ -10,4 +14,8 @@ module.exports = {
   CLOUDINARY_NAME,
   CLOUDINARY_API_KEY,
   CLOUDINARY_API_SECRET,
+  ADMIN_EMAIL,
+  ADMIN_PASSWORD,
+  ADMIN_JWT_SECRET,
+  ADMIN_NAME,
 };

@@ -103,7 +103,9 @@ const updateCollection = async (req, res) => {
       );
 
       if (existingCollection.thumbnail?.public_id) {
-        await Cloudinary.v2.uploader.destroy(existingCollection.thumbnail.public_id);
+        await Cloudinary.v2.uploader.destroy(
+          existingCollection.thumbnail.public_id,
+        );
       }
 
       thumbnail = {

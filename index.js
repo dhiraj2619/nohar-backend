@@ -15,6 +15,7 @@ const connectTodb = require("./dbconnection");
 const { categoryRouter } = require("./routes/category.route");
 const { collectionRouter } = require("./routes/collection.route");
 const { productRouter } = require("./routes/products.route");
+const { adminRouter } = require("./routes/admin.route");
 
 const app = express();
 const port = PORT;
@@ -41,7 +42,7 @@ app.use("/api/v1/collections", collectionRouter);
 app.use("/api/v1/products", productRouter);
 
 // admin routes
-// app.use("/api/v1/admin", adminRouter);
+app.use("/api/v1/admin", adminRouter);
 
 app.listen(port, () => {
   console.log(`server is running on http://localhost:${port}`);
