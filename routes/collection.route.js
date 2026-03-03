@@ -1,3 +1,4 @@
+const upload = require("../config/multerConfig");
 const {
   createCollection,
   getAllCollections,
@@ -7,7 +8,11 @@ const {
 
 const collectionRouter = require("express").Router();
 
-collectionRouter.post("/add", createCollection);
+collectionRouter.post(
+  "/add",
+  upload.fields([{ name: "thumbnail", maxCount: 1 }]),
+  createCollection,
+);
 collectionRouter.get("/get-all", getAllCollections);
 collectionRouter.put("/update/:id", updateCollection);
 collectionRouter.delete("/delete/:id", deleteCollection);
