@@ -1,4 +1,7 @@
-const { getOwnerAdmin, loginAdmin } = require("../controllers/admin.controller");
+const {
+  getOwnerAdmin,
+  loginAdmin,
+} = require("../controllers/admin.controller");
 
 const adminRouter = require("express").Router();
 
