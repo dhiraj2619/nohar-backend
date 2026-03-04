@@ -4,6 +4,7 @@ const {
   getProductsBycollections,
   getProductsByCategories,
   getProductById,
+  getAllProducts,
 } = require("../controllers/product.controller");
 
 const productRouter = require("express").Router();
@@ -13,5 +14,6 @@ productRouter.put("/update/:id", updateProduct);
 productRouter.get("/get-by-collection/:collectionId", getProductsBycollections);
 productRouter.get("/get-by-category/:categoryId", getProductsByCategories);
 productRouter.get("/get-by-id/:id", getProductById);
+productRouter.get("/get-all", getAllProducts);
 
 module.exports = { productRouter };

@@ -411,6 +411,24 @@ const updateProduct = async (req, res) => {
   }
 };
 
+const getAllProducts = async (req, res) => {
+  try {
+    const products = await Product.find();
+    return res.status(200).json({
+      success: true,
+      message: "products retrieved successfully",
+      data: products,
+    });
+  } catch (error) {
+    console.error("Error updating product:", error);
+    return res.status(500).json({
+      success: false,
+      message: "An error occurred while updating the product",
+      error: error.message,
+    });
+  }
+};
+
 const getProductsBycollections = async (req, res) => {
   try {
     const { collectionId } = req.params;
@@ -519,4 +537,5 @@ module.exports = {
   getProductsBycollections,
   getProductsByCategories,
   getProductById,
+  getAllProducts,
 };
