@@ -171,7 +171,7 @@ const createProduct = async (req, res) => {
 
     let guideImage = {};
 
-    if (req.files.guideImage) {
+    if (req.files && req.files.guideImage) {
       const guideImageResult = await Cloudinary.v2.uploader.upload(
         req.files.guideImage[0].path,
         {
