@@ -3,12 +3,12 @@ const Cloudinary = require("cloudinary");
 
 const createCollection = async (req, res) => {
   try {
-    const { name, description, isActive } = req.body;
+    const { name, isActive } = req.body;
 
-    if (!name || !description || isActive === undefined) {
+    if (!name || isActive === undefined) {
       return res.status(400).json({
         success: false,
-        message: "Name, description, and isActive are required fields",
+        message: "Name and isActive are required fields",
       });
     }
 
@@ -34,7 +34,6 @@ const createCollection = async (req, res) => {
 
     const newCollection = await Collection.create({
       name: name.trim(),
-      description,
       isActive,
       thumbnail: {
         public_id: thumbnailResult.public_id,
@@ -62,12 +61,12 @@ const createCollection = async (req, res) => {
 const updateCollection = async (req, res) => {
   try {
     const { id } = req.params;
-    const { name, description, isActive } = req.body;
+    const { name, isActive } = req.body;
 
-    if (!name || !description || isActive === undefined) {
+    if (!name || isActive === undefined) {
       return res.status(400).json({
         success: false,
-        message: "Name, description, and isActive are required fields",
+        message: "Name and isActive are required fields",
       });
     }
 
@@ -115,7 +114,6 @@ const updateCollection = async (req, res) => {
     }
 
     existingCollection.name = name.trim();
-    existingCollection.description = description;
     existingCollection.isActive = isActive;
     existingCollection.thumbnail = thumbnail;
 

@@ -6,10 +6,6 @@ const collectionSchema = new mongoose.Schema(
       type: String,
       required: true,
     },
-    description: {
-      type: String,
-      required: false,
-    },
     isActive: {
       type: Boolean,
       default: true,
