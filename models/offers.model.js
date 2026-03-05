@@ -63,7 +63,7 @@ const offerSchema = new mongoose.Schema(
       default: "CHECKOUT",
     },
 
-    // "Offer Eligibility" bullet points
+
     eligibilityNotes: [
       {
         type: String,
@@ -71,7 +71,7 @@ const offerSchema = new mongoose.Schema(
       },
     ],
 
-    // Optional limits
+
     maxDiscountAmount: {
       type: Number,
       default: null,
