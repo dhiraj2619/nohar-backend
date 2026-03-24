@@ -47,11 +47,10 @@ userSchema.methods.getJWTtoken = function () {
   return jwt.sign({ id: this._id }, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
 };
 
-userSchema.pre("save", function normalizeUserFields(next) {
+userSchema.pre("save", function normalizeUserFields() {
   if (this.email === "" || this.email === null) this.email = undefined;
   if (this.fullName === "") this.fullName = null;
   if (this.phone) this.phone = this.phone.trim();
-  next();
 });
 
 const User = mongoose.model("User", userSchema);
