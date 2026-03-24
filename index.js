@@ -43,7 +43,7 @@ app.use("/api/v1/categories", categoryRouter);
 app.use("/api/v1/collections", collectionRouter);
 app.use("/api/v1/products", productRouter);
 app.use("/api/v1/offers", offerRouter);
-app.use("/api/v1/users", require(userRouter));
+app.use("/api/v1/users", userRouter);
 
 // admin routes
 app.use("/api/v1/admin", adminRouter);
