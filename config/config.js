@@ -7,6 +7,14 @@ const ADMIN_EMAIL = process.env.ADMIN_EMAIL;
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD;
 const ADMIN_JWT_SECRET = process.env.ADMIN_JWT_SECRET;
 const ADMIN_NAME = process.env.ADMIN_NAME;
+const OTP_API_KEY = process.env.OTP_API_KEY;
+const OTP_CAMPAIGN = process.env.OTP_CAMPAIGN;
+const OTP_PE_ID = process.env.OTP_PE_ID;
+const OTP_ROUTE = process.env.OTP_ROUTE;
+const OTP_SENDER_ID = process.env.OTP_SENDER_ID;
+const OTP_TEMPLATE_ID = process.env.OTP_TEMPLATE_ID;
+const JWT_SECRET = process.env.JWT_SECRET;
+const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || "7d";
 
 module.exports = {
   PORT,
@@ -18,4 +26,12 @@ module.exports = {
   ADMIN_PASSWORD,
   ADMIN_JWT_SECRET,
   ADMIN_NAME,
+  OTP_API_KEY,
+  OTP_CAMPAIGN,
+  OTP_PE_ID,
+  OTP_ROUTE,
+  OTP_SENDER_ID,
+  OTP_TEMPLATE_ID,
+  JWT_SECRET,
+  JWT_EXPIRES_IN,
 };

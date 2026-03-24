@@ -17,6 +17,7 @@ const { collectionRouter } = require("./routes/collection.route");
 const { productRouter } = require("./routes/products.route");
 const { adminRouter } = require("./routes/admin.route");
 const { offerRouter } = require("./routes/offer.route");
+const { userRouter } = require("./routes/user.route");
 
 const app = express();
 const port = PORT;
@@ -42,6 +43,7 @@ app.use("/api/v1/categories", categoryRouter);
 app.use("/api/v1/collections", collectionRouter);
 app.use("/api/v1/products", productRouter);
 app.use("/api/v1/offers", offerRouter);
+app.use("/api/v1/users", require(userRouter));
 
 // admin routes
 app.use("/api/v1/admin", adminRouter);
