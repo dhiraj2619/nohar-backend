@@ -146,7 +146,72 @@ const verifyOTP = async (req, res) => {
   }
 };
 
+const logoutUser = async (req, res) => {
+  try {
+    return res.status(200).json({
+      success: true,
+      message: "user logged out success",
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: "Logout failed",
+    });
+  }
+};
+
+const completeUserProfile = async (req, res) => {
+  try {
+    const userId = req.user._id;
+
+    const { firstname, lastname, email } = req.body;
+
+    if (!firstname || !lastname || !email) {
+      return res.status(400).json({
+        success: false,
+        message: "All fields are required",
+      });
+    }
+
+    const fullName = `${firstname} ${lastname}`.trim();
+
+    const user = await User.findById(userId);
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: "User not found",
+      });
+    }
+
+    user.fullName = fullName;
+    user.email = email;
+    user.profileCompleted = true;
+
+    await user.save();
+
+    return res.status(200).json({
+      success: true,
+      message: "Profile completed successfully",
+      user: {
+        _id: user._id,
+        phone: user.phone,
+        fullName: user.fullName,
+        email: user.email,
+        profileCompleted: user.profileCompleted,
+      },
+    });
+  } catch (error) {
+    console.error("Complete Profile Error:", error.message);
+    return res
+      .status(500)
+      .json({ success: false, message: "Failed to complete profile" });
+  }
+};
+
 module.exports = {
   sendOTP,
   verifyOTP,
+  logoutUser,
+  completeUserProfile,
 };
