@@ -69,12 +69,12 @@ const shippingInfoSchema = new mongoose.Schema(
   },
 );
 
-shippingInfoSchema.pre("save", function (next) {
+shippingInfoSchema.pre("save", function () {
   const defaultAddresses = this.addresses.filter((addr) => addr.isDefault);
+
   if (defaultAddresses.length > 1) {
-    return next(new Error("Only one address can be set as default"));
+    throw new Error("Only one address can be set as default");
   }
-  next();
 });
 
 const ShippingInfo = mongoose.model("ShippingInfo", shippingInfoSchema);
