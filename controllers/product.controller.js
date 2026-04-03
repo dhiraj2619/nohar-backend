@@ -65,6 +65,40 @@ const parseObjectIdArrayField = (value, defaultValue = []) => {
   return defaultValue;
 };
 
+const parseIntegerArrayField = (value, defaultValue = []) => {
+  if (value === undefined || value === null || value === "") {
+    return defaultValue;
+  }
+
+  const normalizeNumbers = (items) =>
+    items
+      .map((item) => Number(item))
+      .filter((item) => Number.isInteger(item));
+
+  if (Array.isArray(value)) {
+    return normalizeNumbers(value);
+  }
+
+  if (typeof value === "string") {
+    const trimmedValue = value.trim();
+    if (!trimmedValue) return defaultValue;
+
+    try {
+      const parsed = JSON.parse(trimmedValue);
+      if (Array.isArray(parsed)) {
+        return normalizeNumbers(parsed);
+      }
+    } catch (error) {
+      // If it is not JSON, treat it as a single numeric value.
+    }
+
+    const parsedNumber = Number(trimmedValue);
+    return Number.isInteger(parsedNumber) ? [parsedNumber] : defaultValue;
+  }
+
+  return defaultValue;
+};
+
 const getProductImageFiles = (files = {}) => {
   if (Array.isArray(files.images) && files.images.length) return files.images;
   if (Array.isArray(files.image) && files.image.length) return files.image;
@@ -262,6 +296,7 @@ const updateProduct = async (req, res) => {
       ratings,
       emiAvailable,
       emiStartsAt,
+      imageIndexes,
     } = req.body;
     const offerIds = parseObjectIdArrayField(offers, product.offers);
 
@@ -328,30 +363,91 @@ const updateProduct = async (req, res) => {
 
     const newProductImageFiles = getProductImageFiles(req.files);
     if (newProductImageFiles.length) {
-      const uploadedImages = await Promise.all(
-        newProductImageFiles.map(async (file) => {
-          const imageResult = await Cloudinary.v2.uploader.upload(file.path, {
-            folder: "products/images",
+      const requestedImageIndexes = parseIntegerArrayField(imageIndexes);
+
+      if (requestedImageIndexes.length) {
+        if (requestedImageIndexes.length !== newProductImageFiles.length) {
+          return res.status(400).json({
+            success: false,
+            message:
+              "imageIndexes count must match the number of uploaded images",
           });
+        }
 
-          return {
-            public_id: imageResult.public_id,
-            url: imageResult.secure_url,
-          };
-        }),
-      );
+        const hasDuplicateIndexes =
+          new Set(requestedImageIndexes).size !== requestedImageIndexes.length;
 
-      const existingImagePublicIds = Array.isArray(product.images)
-        ? product.images.map((img) => img?.public_id).filter(Boolean)
-        : [];
+        if (hasDuplicateIndexes) {
+          return res.status(400).json({
+            success: false,
+            message: "imageIndexes must not contain duplicate values",
+          });
+        }
 
-      await Promise.all(
-        existingImagePublicIds.map((publicId) =>
-          Cloudinary.v2.uploader.destroy(publicId),
-        ),
-      );
+        const existingImages = Array.isArray(product.images) ? [...product.images] : [];
+        const hasInvalidIndex = requestedImageIndexes.some(
+          (index) => index < 0 || index >= existingImages.length,
+        );
 
-      product.images = uploadedImages;
+        if (hasInvalidIndex) {
+          return res.status(400).json({
+            success: false,
+            message: "One or more imageIndexes are out of range",
+          });
+        }
+
+        const uploadedImages = await Promise.all(
+          newProductImageFiles.map(async (file) => {
+            const imageResult = await Cloudinary.v2.uploader.upload(file.path, {
+              folder: "products/images",
+            });
+
+            return {
+              public_id: imageResult.public_id,
+              url: imageResult.secure_url,
+            };
+          }),
+        );
+
+        await Promise.all(
+          requestedImageIndexes.map(async (index, currentPosition) => {
+            const existingPublicId = existingImages[index]?.public_id;
+
+            if (existingPublicId) {
+              await Cloudinary.v2.uploader.destroy(existingPublicId);
+            }
+
+            existingImages[index] = uploadedImages[currentPosition];
+          }),
+        );
+
+        product.images = existingImages;
+      } else {
+        const uploadedImages = await Promise.all(
+          newProductImageFiles.map(async (file) => {
+            const imageResult = await Cloudinary.v2.uploader.upload(file.path, {
+              folder: "products/images",
+            });
+
+            return {
+              public_id: imageResult.public_id,
+              url: imageResult.secure_url,
+            };
+          }),
+        );
+
+        const existingImagePublicIds = Array.isArray(product.images)
+          ? product.images.map((img) => img?.public_id).filter(Boolean)
+          : [];
+
+        await Promise.all(
+          existingImagePublicIds.map((publicId) =>
+            Cloudinary.v2.uploader.destroy(publicId),
+          ),
+        );
+
+        product.images = uploadedImages;
+      }
     }
 
     if (req.files && req.files.guideImage) {
