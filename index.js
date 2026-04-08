@@ -19,6 +19,7 @@ const { adminRouter } = require("./routes/admin.route");
 const { offerRouter } = require("./routes/offer.route");
 const { userRouter } = require("./routes/user.route");
 const { shippingRouter } = require("./routes/shipping.route");
+const { paymentRouter } = require("./routes/payment.route");
 
 const app = express();
 const port = PORT;
@@ -46,6 +47,7 @@ app.use("/api/v1/products", productRouter);
 app.use("/api/v1/offers", offerRouter);
 app.use("/api/v1/users", userRouter);
 app.use("/api/v1/shipping", shippingRouter);
+app.use("/api/v1/payment", paymentRouter);
 
 // admin routes
 app.use("/api/v1/admin", adminRouter);
