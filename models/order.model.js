@@ -87,7 +87,40 @@ const orderSchema = new mongoose.Schema(
     payment: {
       type: mongoose.Schema.ObjectId,
       ref: "payment",
+    },
+    paymentMode: {
+      type: String,
       required: true,
+      enum: ["PARTIAL_COD", "FULL"],
+    },
+    paymentStatus: {
+      type: String,
+      required: true,
+      default: "PENDING",
+      enum: ["PENDING", "PARTIALLY_PAID", "PAID"],
+    },
+    partialPercent: {
+      type: Number,
+      default: 0,
+      min: 0,
+      max: 100,
+    },
+    amountPaid: {
+      type: Number,
+      required: true,
+      default: 0,
+      min: 0,
+    },
+    amountDue: {
+      type: Number,
+      required: true,
+      default: 0,
+      min: 0,
+    },
+    remainingPaymentMethod: {
+      type: String,
+      enum: ["COD"],
+      default: "COD",
     },
     paidAt: {
       type: Date,
@@ -98,6 +131,7 @@ const orderSchema = new mongoose.Schema(
       type: Number,
       required: true,
       default: 0,
+      min: 0,
     },
     orderNumber: {
       type: String,
@@ -119,6 +153,7 @@ const orderSchema = new mongoose.Schema(
     },
     deliveredAt: Date,
     shippedAt: Date,
+    outForDeliveryAt: Date,
   },
   { timestamps: true },
 );
