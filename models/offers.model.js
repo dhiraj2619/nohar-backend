@@ -10,7 +10,7 @@ const offerSchema = new mongoose.Schema(
 
     description: {
       type: String,
-      required: true,
+      required: false,
       trim: true,
     },
 
@@ -42,7 +42,6 @@ const offerSchema = new mongoose.Schema(
       min: 0,
     },
 
-    // "Offer available on below products"
     applicableProducts: [
       {
         type: mongoose.Schema.Types.ObjectId,
@@ -63,14 +62,12 @@ const offerSchema = new mongoose.Schema(
       default: "CHECKOUT",
     },
 
-
     eligibilityNotes: [
       {
         type: String,
         trim: true,
       },
     ],
-
 
     maxDiscountAmount: {
       type: Number,

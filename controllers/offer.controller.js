@@ -34,7 +34,16 @@ const parseArrayField = (value, defaultValue = []) => {
 
 const parseObjectIdArray = (value) => {
   const arr = parseArrayField(value, []);
-  return arr.filter((id) => typeof id === "string" && id.trim() !== "");
+
+  return arr
+    .map((item) => {
+      if (typeof item === "string") return item.trim();
+      if (item && typeof item === "object") {
+        return String(item._id || item.id || item.value || "").trim();
+      }
+      return "";
+    })
+    .filter(Boolean);
 };
 
 const parseDateOrNull = (value) => {
@@ -90,7 +99,7 @@ const createOffer = async (req, res) => {
       discountType = "FLAT",
       discountValue,
       minOrderAmount,
-      applicalbleProducts,
+      applicableProducts,
       applicablePaymentModes,
       applicableStage = "CHECKOUT",
       eligibilityNotes,
@@ -102,11 +111,11 @@ const createOffer = async (req, res) => {
       isActive,
     } = req.body;
 
-    if (!title || !description || !code || discountValue === undefined) {
+    if (!title || !code || discountValue === undefined) {
       return res.status(400).json({
         success: false,
         message:
-          "title, description, code and discountValue are required fields",
+          "title, code and discountValue are required fields",
       });
     }
 
@@ -121,7 +130,7 @@ const createOffer = async (req, res) => {
       });
     }
 
-    const productIds = parseObjectIdArray(applicalbleProducts);
+    const productIds = parseObjectIdArray(applicableProducts);
 
     if (productIds.some((id) => !mongoose.Types.ObjectId.isValid(id))) {
       return res.status(400).json({
@@ -160,7 +169,7 @@ const createOffer = async (req, res) => {
 
     const newOffer = await Offer.create({
       title: String(title).trim(),
-      description: String(description).trim(),
+      description: description ? String(description).trim() : undefined,
       code: normalizedCode,
       discountType,
       discountValue: toNumber(discountValue, 0),
@@ -300,7 +309,7 @@ const updateOffer = async (req, res) => {
 
     if (title !== undefined) offer.title = String(title).trim();
     if (description !== undefined)
-      offer.description = String(description).trim();
+      offer.description = description ? String(description).trim() : undefined;
     if (discountType !== undefined) offer.discountType = discountType;
     if (discountValue !== undefined)
       offer.discountValue = toNumber(discountValue, 0);
