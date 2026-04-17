@@ -15,6 +15,7 @@ const OTP_SENDER_ID = process.env.OTP_SENDER_ID;
 const OTP_TEMPLATE_ID = process.env.OTP_TEMPLATE_ID;
 const JWT_SECRET = process.env.JWT_SECRET;
 const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || "7d";
+const ANDROID_APP_SIGNATURE = process.env.ANDROID_APP_SIGNATURE;
 
 module.exports = {
   PORT,
@@ -34,4 +35,5 @@ module.exports = {
   OTP_TEMPLATE_ID,
   JWT_SECRET,
   JWT_EXPIRES_IN,
+  ANDROID_APP_SIGNATURE,
 };
