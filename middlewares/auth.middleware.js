@@ -39,9 +39,28 @@ const isAuth = async (req, res, next) => {
     next();
   } catch (error) {
     console.error("Auth Middleware Error:", error.message);
+    
+    // Handle specific JWT errors
+    if (error.name === "TokenExpiredError") {
+      return res.status(401).json({
+        success: false,
+        message: "Token has expired. Please login again.",
+        code: "TOKEN_EXPIRED",
+      });
+    }
+    
+    if (error.name === "JsonWebTokenError") {
+      return res.status(401).json({
+        success: false,
+        message: "Invalid token",
+        code: "INVALID_TOKEN",
+      });
+    }
+
     return res.status(401).json({
       success: false,
       message: "Not authorized, token failed",
+      code: "AUTH_FAILED",
     });
   }
 };
@@ -77,9 +96,28 @@ const isAdminAuth = async (req, res, next) => {
     next();
   } catch (error) {
     console.error("Admin Auth Middleware Error:", error.message);
+    
+    // Handle specific JWT errors
+    if (error.name === "TokenExpiredError") {
+      return res.status(401).json({
+        success: false,
+        message: "Admin token has expired. Please login again.",
+        code: "TOKEN_EXPIRED",
+      });
+    }
+    
+    if (error.name === "JsonWebTokenError") {
+      return res.status(401).json({
+        success: false,
+        message: "Invalid admin token",
+        code: "INVALID_TOKEN",
+      });
+    }
+
     return res.status(401).json({
       success: false,
       message: "Not authorized, admin token failed",
+      code: "AUTH_FAILED",
     });
   }
 };
