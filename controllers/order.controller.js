@@ -6,6 +6,77 @@ const normalizeNumber = (value) => {
   return Number.isNaN(numericValue) ? null : numericValue;
 };
 
+const ORDER_PHASES = [
+  "ORDER_PLACED",
+  "READY_TO_PICK",
+  "IN_TRANSIT",
+  "DELIVERED",
+];
+
+const normalizeOrderStatus = (status) => {
+  const normalized = String(status || "").trim().toUpperCase();
+
+  const statusMap = {
+    PROCESSING: "ORDER_PLACED",
+    ORDER_PLACED: "ORDER_PLACED",
+    READY_TO_PICK: "READY_TO_PICK",
+    "READY TO PICK": "READY_TO_PICK",
+    READY_FOR_PICKUP: "READY_TO_PICK",
+    SHIPPED: "IN_TRANSIT",
+    IN_TRANSIT: "IN_TRANSIT",
+    "IN TRANSIT": "IN_TRANSIT",
+    OUT_FOR_DELIVERY: "IN_TRANSIT",
+    DELIVERED: "DELIVERED",
+    COMPLETED: "DELIVERED",
+    CANCELLED: "CANCELLED",
+    CANCELED: "CANCELLED",
+  };
+
+  return statusMap[normalized] || normalized;
+};
+
+const applyOrderStatusSideEffects = (order, nextStatus) => {
+  const now = new Date();
+  order.orderStatus = nextStatus;
+
+  if (nextStatus === "READY_TO_PICK" && !order.readyToPickAt) {
+    order.readyToPickAt = now;
+  }
+
+  if (nextStatus === "IN_TRANSIT") {
+    if (!order.readyToPickAt) {
+      order.readyToPickAt = now;
+    }
+
+    if (!order.inTransitAt) {
+      order.inTransitAt = now;
+    }
+
+    if (!order.shippedAt) {
+      order.shippedAt = now;
+    }
+
+    order.outForDeliveryAt = now;
+  }
+
+  if (nextStatus === "DELIVERED") {
+    if (!order.readyToPickAt) {
+      order.readyToPickAt = now;
+    }
+
+    if (!order.inTransitAt) {
+      order.inTransitAt = now;
+    }
+
+    if (!order.shippedAt) {
+      order.shippedAt = now;
+    }
+
+    order.outForDeliveryAt = now;
+    order.deliveredAt = now;
+  }
+};
+
 const createOrder = async (req, res) => {
   try {
     const {
@@ -111,7 +182,7 @@ const createOrder = async (req, res) => {
       orderItems,
       totalPrice: normalizedTotal,
       paidAt: Date.now(),
-      orderStatus: "Processing",
+      orderStatus: "ORDER_PLACED",
       payment: paymentId,
       paymentMode,
       paymentStatus,
@@ -153,14 +224,14 @@ const cancelOrder = async (req, res) => {
       });
     }
 
-    if (order.orderStatus === "Cancelled") {
+    if (normalizeOrderStatus(order.orderStatus) === "CANCELLED") {
       return res.status(400).json({
         success: false,
         message: "Order is already cancelled",
       });
     }
 
-    order.orderStatus = "Cancelled";
+    order.orderStatus = "CANCELLED";
     await order.save();
 
     res.status(200).json({
@@ -210,15 +281,10 @@ const updateOrderStatus = async (req, res) => {
     const { orderId } = req.params;
     const { status } = req.body;
 
-    const validStatuses = [
-      "Processing",
-      "Shipped",
-      "Out for Delivery",
-      "Delivered",
-      "Cancelled",
-    ];
+    const normalizedStatus = normalizeOrderStatus(status);
+    const validStatuses = [...ORDER_PHASES, "CANCELLED"];
 
-    if (!validStatuses.includes(status)) {
+    if (!validStatuses.includes(normalizedStatus)) {
       return res
         .status(400)
         .json({ success: false, message: "Invalid order status" });
@@ -232,19 +298,7 @@ const updateOrderStatus = async (req, res) => {
         .json({ success: false, message: "Order not found" });
     }
 
-    order.orderStatus = status;
-
-    if (status === "Shipped") {
-      order.shippedAt = new Date();
-    }
-
-    if (status === "Out for Delivery") {
-      order.outForDeliveryAt = new Date();
-    }
-
-    if (status === "Delivered") {
-      order.deliveredAt = new Date();
-    }
+    applyOrderStatusSideEffects(order, normalizedStatus);
 
     await order.save();
 
@@ -260,10 +314,67 @@ const updateOrderStatus = async (req, res) => {
   }
 };
 
+const advanceOrderPhase = async (req, res) => {
+  try {
+    const { orderId } = req.params;
+
+    const order = await Order.findById(orderId);
+
+    if (!order) {
+      return res
+        .status(404)
+        .json({ success: false, message: "Order not found" });
+    }
+
+    const currentStatus = normalizeOrderStatus(order.orderStatus);
+
+    if (currentStatus === "CANCELLED") {
+      return res.status(400).json({
+        success: false,
+        message: "Cancelled orders cannot be advanced",
+      });
+    }
+
+    const currentIndex = ORDER_PHASES.indexOf(currentStatus);
+
+    if (currentIndex === -1) {
+      return res.status(400).json({
+        success: false,
+        message: "Order is in an unknown status and cannot be advanced",
+      });
+    }
+
+    if (currentIndex >= ORDER_PHASES.length - 1) {
+      return res.status(400).json({
+        success: false,
+        message: "Order is already in the final phase",
+      });
+    }
+
+    const nextStatus = ORDER_PHASES[currentIndex + 1];
+
+    applyOrderStatusSideEffects(order, nextStatus);
+    await order.save();
+
+    return res.status(200).json({
+      success: true,
+      message: `Order moved to ${nextStatus}`,
+      order,
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: "Something went wrong",
+      error: error.message,
+    });
+  }
+};
+
 module.exports = {
   createOrder,
   cancelOrder,
   getOrders,
   getUserOrders,
   updateOrderStatus,
+  advanceOrderPhase,
 };

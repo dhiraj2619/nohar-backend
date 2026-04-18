@@ -348,4 +348,39 @@ const updateOffer = async (req, res) => {
   }
 };
 
-module.exports = { getOffers, createOffer, updateOffer };
+const deleteOffer = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid offer id",
+      });
+    }
+
+    const deletedOffer = await Offer.findByIdAndDelete(id);
+
+    if (!deletedOffer) {
+      return res.status(404).json({
+        success: false,
+        message: "Offer not found",
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "Offer deleted successfully",
+      data: deletedOffer,
+    });
+  } catch (error) {
+    console.error("Error deleting offer:", error);
+    return res.status(500).json({
+      success: false,
+      message: "An error occurred while deleting the offer",
+      error: error.message,
+    });
+  }
+};
+
+module.exports = { getOffers, createOffer, updateOffer, deleteOffer };
