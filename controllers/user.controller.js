@@ -6,6 +6,7 @@ const {
   OTP_SENDER_ID,
   OTP_TEMPLATE_ID,
   OTP_PE_ID,
+  ANDROID_APP_SIGNATURE,
 } = require("../config/config");
 const Otp = require("../models/otp.model");
 const User = require("../models/users.model");
@@ -28,7 +29,7 @@ const sendOTP = async (req, res) => {
     const otp = generateOTP();
     const otpExpiry = new Date(Date.now() + 10 * 60 * 1000); // OTP valid for 10 minutes
 
-    const msg = `Dear Customer Your Nohar cosmetics login OTP is ${otp} It will expire in next 10 mins. Please do not share code with anyone.`;
+    const msg = `Dear Customer Your Nohar cosmetics login OTP is ${otp} It will expire in next 10 mins. Please do not share code with anyone.\r\n${ANDROID_APP_SIGNATURE}`;
 
     const url = `https://kutility.org/app/smsapi/index.php?key=${OTP_API_KEY}&campaign=${OTP_CAMPAIGN}&routeid=${OTP_ROUTE}&type=text&contacts=${phone}&senderid=${OTP_SENDER_ID}&msg=${encodeURIComponent(msg)}&template_id=${OTP_TEMPLATE_ID}&pe_id=${OTP_PE_ID}`;
 
