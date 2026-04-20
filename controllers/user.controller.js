@@ -210,9 +210,63 @@ const completeUserProfile = async (req, res) => {
   }
 };
 
+const saveFcmToken = async (req, res) => {
+  try {
+    const { fcmToken } = req.body;
+
+    if (!fcmToken || typeof fcmToken !== "string") {
+      return res.status(400).json({
+        success: false,
+        message: "Valid FCM token is required",
+      });
+    }
+
+    const normalizedToken = fcmToken.trim();
+
+    if (!normalizedToken) {
+      return res.status(400).json({
+        success: false,
+        message: "Valid FCM token is required",
+      });
+    }
+
+    await User.findByIdAndUpdate(req.user._id, { fcmToken: normalizedToken });
+
+    return res.status(200).json({
+      success: true,
+      message: "FCM token saved successfully",
+    });
+  } catch (error) {
+    console.error("Save FCM Token Error:", error.message);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to save FCM token",
+    });
+  }
+};
+
+const clearFcmToken = async (req, res) => {
+  try {
+    await User.findByIdAndUpdate(req.user._id, { fcmToken: null });
+
+    return res.status(200).json({
+      success: true,
+      message: "FCM token removed successfully",
+    });
+  } catch (error) {
+    console.error("Clear FCM Token Error:", error.message);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to clear FCM token",
+    });
+  }
+};
+
 module.exports = {
   sendOTP,
   verifyOTP,
   logoutUser,
   completeUserProfile,
+  saveFcmToken,
+  clearFcmToken,
 };

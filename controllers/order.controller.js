@@ -1,5 +1,7 @@
-﻿const Order = require("../models/order.model");
+const Order = require("../models/order.model");
 const ShippingInfo = require("../models/shippingInfo.model");
+const User = require("../models/users.model");
+const { sendPushToUsers } = require("../services/notification.service");
 
 const normalizeNumber = (value) => {
   const numericValue = Number(value);
@@ -74,6 +76,68 @@ const applyOrderStatusSideEffects = (order, nextStatus) => {
 
     order.outForDeliveryAt = now;
     order.deliveredAt = now;
+  }
+};
+
+const getShortOrderId = (order) => String(order?._id || "").slice(-6).toUpperCase();
+
+const buildOrderNotificationContent = (status, order) => {
+  const shortOrderId = getShortOrderId(order);
+
+  const contentMap = {
+    ORDER_PLACED: {
+      title: "Order placed successfully",
+      body: `Your order #${shortOrderId} has been placed successfully.`,
+    },
+    READY_TO_PICK: {
+      title: "Order is ready to pick",
+      body: `Your order #${shortOrderId} is ready to pick.`,
+    },
+    IN_TRANSIT: {
+      title: "Order is on the way",
+      body: `Your order #${shortOrderId} is now in transit.`,
+    },
+    DELIVERED: {
+      title: "Order delivered",
+      body: `Your order #${shortOrderId} has been delivered.`,
+    },
+    CANCELLED: {
+      title: "Order cancelled",
+      body: `Your order #${shortOrderId} has been cancelled.`,
+    },
+  };
+
+  return (
+    contentMap[status] || {
+      title: "Order update",
+      body: `Your order #${shortOrderId} is now ${status}.`,
+    }
+  );
+};
+
+const notifyOrderUser = async (userId, order, status) => {
+  try {
+    const user = await User.findById(userId).select("_id fcmToken");
+
+    if (!user?.fcmToken) {
+      return;
+    }
+
+    const { title, body } = buildOrderNotificationContent(status, order);
+
+    await sendPushToUsers({
+      users: [user],
+      title,
+      body,
+      data: {
+        type: "ORDER_UPDATE",
+        orderId: order._id,
+        orderStatus: status,
+        userId,
+      },
+    });
+  } catch (error) {
+    console.error("Order notification send failed:", error.message);
   }
 };
 
@@ -193,6 +257,7 @@ const createOrder = async (req, res) => {
     });
 
     await order.save();
+    await notifyOrderUser(userId, order, "ORDER_PLACED");
 
     res.status(201).json({
       success: true,
@@ -233,6 +298,7 @@ const cancelOrder = async (req, res) => {
 
     order.orderStatus = "CANCELLED";
     await order.save();
+    await notifyOrderUser(order.user, order, "CANCELLED");
 
     res.status(200).json({
       success: true,
@@ -301,6 +367,7 @@ const updateOrderStatus = async (req, res) => {
     applyOrderStatusSideEffects(order, normalizedStatus);
 
     await order.save();
+    await notifyOrderUser(order.user, order, normalizedStatus);
 
     res
       .status(200)
@@ -355,6 +422,7 @@ const advanceOrderPhase = async (req, res) => {
 
     applyOrderStatusSideEffects(order, nextStatus);
     await order.save();
+    await notifyOrderUser(order.user, order, nextStatus);
 
     return res.status(200).json({
       success: true,

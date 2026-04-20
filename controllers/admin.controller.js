@@ -1,11 +1,14 @@
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
+const mongoose = require("mongoose");
 const {
   ADMIN_EMAIL,
   ADMIN_PASSWORD,
   ADMIN_JWT_SECRET,
   ADMIN_NAME,
 } = require("../config/config");
+const User = require("../models/users.model");
+const { sendPushToUsers } = require("../services/notification.service");
 
 const buildOwnerProfile = () => ({
   id: "owner-nohar-001",
@@ -102,7 +105,145 @@ const getOwnerAdmin = async (req, res) => {
   }
 };
 
+const normalizeStringArray = (value) =>
+  (Array.isArray(value) ? value : [])
+    .map((item) => String(item || "").trim())
+    .filter(Boolean);
+
+const normalizeObjectIdArray = (value) =>
+  normalizeStringArray(value).filter((id) => mongoose.Types.ObjectId.isValid(id));
+
+const buildManualNotificationQuery = ({ audience, userIds, phoneNumbers }) => {
+  const normalizedAudience = String(audience || "all").trim().toLowerCase();
+
+  if (normalizedAudience === "all") {
+    return { fcmToken: { $exists: true, $ne: null } };
+  }
+
+  if (normalizedAudience === "users") {
+    const normalizedUserIds = normalizeObjectIdArray(userIds);
+
+    if (!normalizedUserIds.length) {
+      return null;
+    }
+
+    return {
+      _id: { $in: normalizedUserIds },
+      fcmToken: { $exists: true, $ne: null },
+    };
+  }
+
+  if (normalizedAudience === "phones") {
+    const normalizedPhones = normalizeStringArray(phoneNumbers);
+
+    if (!normalizedPhones.length) {
+      return null;
+    }
+
+    return {
+      phone: { $in: normalizedPhones },
+      fcmToken: { $exists: true, $ne: null },
+    };
+  }
+
+  return undefined;
+};
+
+const sendManualNotification = async (req, res) => {
+  try {
+    const { title, body, audience = "all", userIds, phoneNumbers, data, imageUrl } = req.body;
+
+    if (!title || !body) {
+      return res.status(400).json({
+        success: false,
+        message: "Title and body are required",
+      });
+    }
+
+    const query = buildManualNotificationQuery({ audience, userIds, phoneNumbers });
+
+    if (query === undefined) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid audience. Use all, users, or phones",
+      });
+    }
+
+    if (query === null) {
+      return res.status(400).json({
+        success: false,
+        message: "Recipients are required for the selected audience",
+      });
+    }
+
+    const recipients = await User.find(query).select("_id phone fullName fcmToken");
+
+    if (!recipients.length) {
+      return res.status(404).json({
+        success: false,
+        message: "No users with registered FCM tokens were found for this audience",
+      });
+    }
+
+    const deliveryResult = await sendPushToUsers({
+      users: recipients,
+      title,
+      body,
+      data: {
+        type: "ADMIN_BROADCAST",
+        audience,
+        ...data,
+      },
+      imageUrl,
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: "Notification processed",
+      audience,
+      recipientCount: recipients.length,
+      ...deliveryResult,
+    });
+  } catch (error) {
+    console.error("Send manual notification error:", error.message);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to send notification",
+      error: error.message,
+    });
+  }
+};
+
+const getNotificationRecipients = async (req, res) => {
+  try {
+    const users = await User.find({ fcmToken: { $exists: true, $ne: null } })
+      .select("_id fullName phone email fcmToken")
+      .sort({ createdAt: -1 });
+
+    return res.status(200).json({
+      success: true,
+      count: users.length,
+      users: users.map((user) => ({
+        _id: user._id,
+        fullName: user.fullName,
+        phone: user.phone,
+        email: user.email,
+        hasFcmToken: Boolean(user.fcmToken),
+      })),
+    });
+  } catch (error) {
+    console.error("Get notification recipients error:", error.message);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch notification recipients",
+      error: error.message,
+    });
+  }
+};
+
 module.exports = {
   loginAdmin,
   getOwnerAdmin,
+  sendManualNotification,
+  getNotificationRecipients,
 };

@@ -21,11 +21,13 @@ const { userRouter } = require("./routes/user.route");
 const { shippingRouter } = require("./routes/shipping.route");
 const { paymentRouter } = require("./routes/payment.route");
 const orderRouter = require("./routes/order.route");
+const { initializeFirebase } = require("./services/notification.service");
 
 const app = express();
 const port = PORT;
 
 connectTodb();
+initializeFirebase();
 
 cloudinary.config({
   cloud_name: CLOUDINARY_NAME,
