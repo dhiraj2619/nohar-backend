@@ -9,6 +9,7 @@ const {
   getOrders,
   updateOrderStatus,
 } = require("../controllers/order.controller");
+const { updateMostBuyStatus } = require("../controllers/product.controller");
 const { isAdminAuth } = require("../middlewares/auth.middleware");
 
 const adminRouter = require("express").Router();
@@ -18,6 +19,7 @@ adminRouter.get("/owner", getOwnerAdmin);
 adminRouter.get("/orders", isAdminAuth, getOrders);
 adminRouter.patch("/orders/:orderId/next-phase", isAdminAuth, advanceOrderPhase);
 adminRouter.patch("/orders/:orderId/status", isAdminAuth, updateOrderStatus);
+adminRouter.patch("/products/:id/most-buy", isAdminAuth, updateMostBuyStatus);
 adminRouter.get("/notifications/recipients", isAdminAuth, getNotificationRecipients);
 adminRouter.post("/notifications/send", isAdminAuth, sendManualNotification);
 

@@ -6,6 +6,7 @@ const {
   getProductsByCategories,
   getProductById,
   getAllProducts,
+  getMostBuyProducts,
 } = require("../controllers/product.controller");
 
 const productRouter = require("express").Router();
@@ -29,6 +30,7 @@ productRouter.put(
 productRouter.get("/get-by-collection/:collectionId", getProductsBycollections);
 productRouter.get("/get-by-category/:categoryId", getProductsByCategories);
 productRouter.get("/get-by-id/:id", getProductById);
+productRouter.get("/most-buys", getMostBuyProducts);
 productRouter.get("/get-all", getAllProducts);
 
 module.exports = { productRouter };

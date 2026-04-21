@@ -120,6 +120,7 @@ const createProduct = async (req, res) => {
       ratings,
       emiAvailable,
       emiStartsAt,
+      isMostBuy,
     } = req.body;
 
     if (!name || !description || !price || !categoryId || !collectionId) {
@@ -246,6 +247,7 @@ const createProduct = async (req, res) => {
       ratings: toNumber(ratings, 0),
       emiAvailable: toBoolean(emiAvailable),
       emiStartsAt: toNumber(emiStartsAt, 0),
+      isMostBuy: toBoolean(isMostBuy),
     });
 
     return res.status(201).json({
@@ -297,6 +299,7 @@ const updateProduct = async (req, res) => {
       emiAvailable,
       emiStartsAt,
       imageIndexes,
+      isMostBuy,
     } = req.body;
     const offerIds = parseObjectIdArrayField(offers, product.offers);
 
@@ -489,6 +492,7 @@ const updateProduct = async (req, res) => {
       product.emiAvailable = toBoolean(emiAvailable);
     if (emiStartsAt !== undefined)
       product.emiStartsAt = toNumber(emiStartsAt, product.emiStartsAt);
+    if (isMostBuy !== undefined) product.isMostBuy = toBoolean(isMostBuy);
 
     const updatedProduct = await product.save();
 
@@ -520,6 +524,76 @@ const getAllProducts = async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "An error occurred while updating the product",
+      error: error.message,
+    });
+  }
+};
+
+const getMostBuyProducts = async (req, res) => {
+  try {
+    const products = await Product.find({ isMostBuy: true })
+      .populate("categoryId", "name")
+      .populate("collectionId", "name")
+      .populate("offers")
+      .sort({ updatedAt: -1, createdAt: -1 })
+      .limit(8);
+
+    return res.status(200).json({
+      success: true,
+      message: "Most buy products retrieved successfully",
+      data: products,
+    });
+  } catch (error) {
+    console.error("Error retrieving most buy products:", error);
+    return res.status(500).json({
+      success: false,
+      message: "An error occurred while retrieving most buy products",
+      error: error.message,
+    });
+  }
+};
+
+const updateMostBuyStatus = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { isMostBuy } = req.body;
+
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid product id",
+      });
+    }
+
+    if (isMostBuy === undefined) {
+      return res.status(400).json({
+        success: false,
+        message: "isMostBuy is required",
+      });
+    }
+
+    const product = await Product.findById(id);
+
+    if (!product) {
+      return res.status(404).json({
+        success: false,
+        message: "Product not found",
+      });
+    }
+
+    product.isMostBuy = toBoolean(isMostBuy);
+    await product.save();
+
+    return res.status(200).json({
+      success: true,
+      message: `Product most buy status updated to ${product.isMostBuy}`,
+      data: product,
+    });
+  } catch (error) {
+    console.error("Error updating most buy status:", error);
+    return res.status(500).json({
+      success: false,
+      message: "An error occurred while updating most buy status",
       error: error.message,
     });
   }
@@ -634,4 +708,6 @@ module.exports = {
   getProductsByCategories,
   getProductById,
   getAllProducts,
+  getMostBuyProducts,
+  updateMostBuyStatus,
 };

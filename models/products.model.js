@@ -105,6 +105,11 @@ const productSchema = new mongoose.Schema(
       default: 0,
       min: 0,
     },
+    isMostBuy: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
   },
   { timestamps: true },
 );
