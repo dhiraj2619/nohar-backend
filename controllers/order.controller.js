@@ -154,7 +154,9 @@ const createOrder = async (req, res) => {
       amountPaid,
     } = req.body;
 
-    if (!userId || !shippingId || !orderItems || !totalPrice || !paymentMode) {
+    const normalizedPaymentMode = String(paymentMode || "").trim().toUpperCase();
+
+    if (!userId || !shippingId || !orderItems || !totalPrice || !normalizedPaymentMode) {
       return res
         .status(400)
         .json({ success: false, message: "Missing required fields" });
@@ -174,7 +176,10 @@ const createOrder = async (req, res) => {
         .json({ success: false, message: "Invalid total price" });
     }
 
-    if (!paymentId) {
+    const requiresOnlinePayment =
+      normalizedPaymentMode === "FULL" || normalizedPaymentMode === "PARTIAL_COD";
+
+    if (requiresOnlinePayment && !paymentId) {
       return res
         .status(400)
         .json({ success: false, message: "Payment ID is required" });
@@ -204,13 +209,16 @@ const createOrder = async (req, res) => {
     let paymentStatus = "PENDING";
     let remainingPaymentMethod = "COD";
 
-    if (paymentMode === "FULL") {
+    let normalizedPaymentId = paymentId;
+    let paidAt = Date.now();
+
+    if (normalizedPaymentMode === "FULL") {
       normalizedPercent = 100;
       normalizedAmountPaid = normalizedTotal;
       normalizedAmountDue = 0;
       paymentStatus = "PAID";
       remainingPaymentMethod = undefined;
-    } else if (paymentMode === "PARTIAL_COD") {
+    } else if (normalizedPaymentMode === "PARTIAL_COD") {
       const percentValue = normalizeNumber(partialPercent ?? 20);
 
       if (!percentValue || percentValue <= 0 || percentValue >= 100) {
@@ -228,6 +236,14 @@ const createOrder = async (req, res) => {
         (normalizedTotal - normalizedAmountPaid).toFixed(2),
       );
       paymentStatus = "PARTIALLY_PAID";
+    } else if (normalizedPaymentMode === "COD") {
+      normalizedPercent = 0;
+      normalizedAmountPaid = 0;
+      normalizedAmountDue = normalizedTotal;
+      paymentStatus = "PENDING";
+      remainingPaymentMethod = "COD";
+      normalizedPaymentId = undefined;
+      paidAt = undefined;
     } else {
       return res
         .status(400)
@@ -245,16 +261,19 @@ const createOrder = async (req, res) => {
       shippingInfo: selectedAddress,
       orderItems,
       totalPrice: normalizedTotal,
-      paidAt: Date.now(),
       orderStatus: "ORDER_PLACED",
-      payment: paymentId,
-      paymentMode,
+      payment: normalizedPaymentId,
+      paymentMode: normalizedPaymentMode,
       paymentStatus,
       partialPercent: normalizedPercent,
       amountPaid: normalizedAmountPaid,
       amountDue: normalizedAmountDue,
       remainingPaymentMethod,
     });
+
+    if (paidAt) {
+      order.paidAt = paidAt;
+    }
 
     await order.save();
     await notifyOrderUser(userId, order, "ORDER_PLACED");

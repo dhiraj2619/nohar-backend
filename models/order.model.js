@@ -91,7 +91,7 @@ const orderSchema = new mongoose.Schema(
     paymentMode: {
       type: String,
       required: true,
-      enum: ["PARTIAL_COD", "FULL"],
+      enum: ["PARTIAL_COD", "FULL", "COD"],
     },
     paymentStatus: {
       type: String,
@@ -124,7 +124,6 @@ const orderSchema = new mongoose.Schema(
     },
     paidAt: {
       type: Date,
-      required: true,
       default: Date.now,
     },
     totalPrice: {
