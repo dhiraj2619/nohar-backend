@@ -142,6 +142,19 @@ const notifyOrderUser = async (userId, order, status) => {
   }
 };
 
+const runPostOrderTasks = ({ userId, order, customer, customerEmail }) => {
+  setImmediate(async () => {
+    await Promise.allSettled([
+      notifyOrderUser(userId, order, "ORDER_PLACED"),
+      sendOrderPlacedEmails({
+        order,
+        user: customer,
+        customerEmail,
+      }),
+    ]);
+  });
+};
+
 const createOrder = async (req, res) => {
   try {
     const {
@@ -153,9 +166,11 @@ const createOrder = async (req, res) => {
       paymentMode,
       partialPercent,
       amountPaid,
+      customerEmail,
     } = req.body;
 
     const normalizedPaymentMode = String(paymentMode || "").trim().toUpperCase();
+    const normalizedCustomerEmail = String(customerEmail || "").trim().toLowerCase();
 
     if (!userId || !shippingId || !orderItems || !totalPrice || !normalizedPaymentMode) {
       return res
@@ -283,15 +298,18 @@ const createOrder = async (req, res) => {
     }
 
     await order.save();
-    await Promise.allSettled([
-      notifyOrderUser(userId, order, "ORDER_PLACED"),
-      sendOrderPlacedEmails({ order, user: customer }),
-    ]);
 
     res.status(201).json({
       success: true,
       message: "Order placed successfully",
       order,
+    });
+
+    runPostOrderTasks({
+      userId,
+      order,
+      customer,
+      customerEmail: normalizedCustomerEmail || customer?.email,
     });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
