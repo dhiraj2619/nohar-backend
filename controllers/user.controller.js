@@ -1,7 +1,8 @@
 const { default: axios } = require("axios");
-const nodemailer = require("nodemailer");
 const {
-  MAIL_FROM,
+  BREVO_API_KEY,
+  BREVO_SENDER_EMAIL,
+  BREVO_SENDER_NAME,
   ORDER_OWNER_EMAIL,
   OTP_API_KEY,
   OTP_CAMPAIGN,
@@ -9,22 +10,13 @@ const {
   OTP_SENDER_ID,
   OTP_TEMPLATE_ID,
   OTP_PE_ID,
-  SMTP_HOST,
-  SMTP_PASS,
-  SMTP_PORT,
-  SMTP_SECURE,
-  SMTP_USER,
   ANDROID_APP_SIGNATURE,
 } = require("../config/config");
 const Otp = require("../models/otp.model");
 const User = require("../models/users.model");
 
-let transporter;
-
 const generateOTP = () => Math.floor(100000 + Math.random() * 900000);
 const normalizeEmail = (value) => String(value || "").trim();
-const normalizeSmtpPass = (value) =>
-  String(value || "").replace(/\s+/g, "").trim();
 
 const formatCurrency = (amount) => {
   const numericAmount = Number(amount || 0);
@@ -109,65 +101,31 @@ const getOrderItemsHtml = (orderDetails) =>
     })
     .join("");
 
-const getMailTransporter = () => {
-  if (transporter) {
-    return transporter;
+const sendBrevoEmail = async ({ to, subject, text, html }) => {
+  if (!BREVO_API_KEY) {
+    throw new Error("Brevo API key is not configured");
   }
 
-  const normalizedUser = normalizeEmail(SMTP_USER);
-  const normalizedPass = normalizeSmtpPass(SMTP_PASS);
-
-  if (!normalizedUser || !normalizedPass) {
-    return null;
-  }
-
-  if (normalizedUser.toLowerCase().endsWith("@gmail.com")) {
-    transporter = nodemailer.createTransport({
-      service: "gmail",
-      auth: {
-        user: normalizedUser,
-        pass: normalizedPass,
+  return axios.post(
+    "https://api.brevo.com/v3/smtp/email",
+    {
+      sender: {
+        name: BREVO_SENDER_NAME,
+        email: BREVO_SENDER_EMAIL,
       },
-      connectionTimeout: 10000,
-      greetingTimeout: 10000,
-      socketTimeout: 15000,
-    });
-
-    return transporter;
-  }
-
-  if (!SMTP_HOST || !SMTP_PORT) {
-    return null;
-  }
-
-  transporter = nodemailer.createTransport({
-    host: SMTP_HOST,
-    port: Number(SMTP_PORT),
-    secure:
-      String(SMTP_SECURE).toLowerCase() === "true" || Number(SMTP_PORT) === 465,
-    auth: {
-      user: normalizedUser,
-      pass: normalizedPass,
+      to: [{ email: to }],
+      subject,
+      textContent: text,
+      htmlContent: html,
     },
-    connectionTimeout: 10000,
-    greetingTimeout: 10000,
-    socketTimeout: 15000,
-  });
-
-  return transporter;
-};
-
-const sendMail = async (mailOptions) => {
-  const activeTransporter = getMailTransporter();
-
-  if (!activeTransporter) {
-    throw new Error("Mail transporter is not configured");
-  }
-
-  return activeTransporter.sendMail({
-    from: MAIL_FROM || normalizeEmail(SMTP_USER) || ORDER_OWNER_EMAIL,
-    ...mailOptions,
-  });
+    {
+      headers: {
+        "api-key": BREVO_API_KEY,
+        "Content-Type": "application/json",
+      },
+      timeout: 20000,
+    },
+  );
 };
 
 const sendOTP = async (req, res) => {
@@ -518,8 +476,8 @@ const sendOrderEmailSms = async (req, res) => {
       `,
     };
 
-    await sendMail(userEmailOptions);
-    await sendMail(adminEmailOptions);
+    await sendBrevoEmail(userEmailOptions);
+    await sendBrevoEmail(adminEmailOptions);
 
     return res.status(200).json({
       success: true,
@@ -529,7 +487,8 @@ const sendOrderEmailSms = async (req, res) => {
     console.error("Notification error:", {
       message: error?.message,
       code: error?.code,
-      command: error?.command,
+      response: error?.response?.data,
+      status: error?.response?.status,
     });
 
     return res.status(500).json({
