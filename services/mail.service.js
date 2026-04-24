@@ -1,3 +1,4 @@
+const dns = require("dns").promises;
 const nodemailer = require("nodemailer");
 const {
   MAIL_FROM,
@@ -10,6 +11,8 @@ const {
 } = require("../config/config");
 
 let transporter;
+let transporterVerified = false;
+let diagnosticsLogged = false;
 
 const formatCurrency = (amount) => {
   const numericAmount = Number(amount || 0);
@@ -26,6 +29,67 @@ const escapeHtml = (value) =>
 
 const normalizeEmail = (value) => String(value || "").trim();
 const normalizeSmtpPass = (value) => String(value || "").replace(/\s+/g, "").trim();
+
+const getMaskedEmail = (email) => {
+  const normalizedEmail = normalizeEmail(email);
+
+  if (!normalizedEmail.includes("@")) {
+    return normalizedEmail || "not-set";
+  }
+
+  const [userName, domain] = normalizedEmail.split("@");
+  const visiblePart = userName.slice(0, 2) || "**";
+  return `${visiblePart}***@${domain}`;
+};
+
+const getTransportSummary = () => ({
+  host: normalizeEmail(SMTP_HOST) || "not-set",
+  port: Number(SMTP_PORT) || "not-set",
+  secure:
+    String(SMTP_SECURE).toLowerCase() === "true" || Number(SMTP_PORT) === 465,
+  user: getMaskedEmail(SMTP_USER),
+  passLength: normalizeSmtpPass(SMTP_PASS).length,
+  usingGmailService: normalizeEmail(SMTP_USER).toLowerCase().endsWith("@gmail.com"),
+});
+
+const logMailDiagnostics = async () => {
+  if (diagnosticsLogged) {
+    return;
+  }
+
+  diagnosticsLogged = true;
+
+  const summary = getTransportSummary();
+  console.log("[mail] transport summary:", summary);
+
+  if (summary.host !== "not-set") {
+    try {
+      const lookupResult = await dns.lookup(summary.host, { all: true });
+      console.log("[mail] dns lookup:", lookupResult);
+    } catch (error) {
+      console.error("[mail] dns lookup failed:", {
+        message: error.message,
+        code: error.code,
+        errno: error.errno,
+        syscall: error.syscall,
+        hostname: error.hostname,
+      });
+    }
+  }
+};
+
+const logMailErrorDetails = (label, error) => {
+  console.error(`[mail] ${label}:`, {
+    message: error?.message,
+    code: error?.code,
+    errno: error?.errno,
+    syscall: error?.syscall,
+    command: error?.command,
+    response: error?.response,
+    responseCode: error?.responseCode,
+    stack: error?.stack?.split("\n")?.slice(0, 3)?.join(" | "),
+  });
+};
 
 const getCustomerName = (user, order) =>
   user?.fullName || order?.shippingInfo?.fullName || "Customer";
@@ -111,6 +175,8 @@ const createTransporter = () => {
     connectionTimeout: 10000,
     greetingTimeout: 10000,
     socketTimeout: 15000,
+    logger: true,
+    debug: true,
   };
 
   if (normalizedUser.toLowerCase().endsWith("@gmail.com")) {
@@ -142,6 +208,31 @@ const getTransporter = () => {
   return transporter;
 };
 
+const verifyTransporterOnce = async () => {
+  if (transporterVerified) {
+    return true;
+  }
+
+  const activeTransporter = getTransporter();
+
+  if (!activeTransporter) {
+    console.warn("[mail] transporter missing during verify");
+    return false;
+  }
+
+  await logMailDiagnostics();
+
+  try {
+    await activeTransporter.verify();
+    transporterVerified = true;
+    console.log("[mail] transporter verify successful");
+    return true;
+  } catch (error) {
+    logMailErrorDetails("transporter verify failed", error);
+    throw error;
+  }
+};
+
 const sendMailSafely = async (mailOptions) => {
   const activeTransporter = getTransporter();
 
@@ -149,6 +240,8 @@ const sendMailSafely = async (mailOptions) => {
     console.warn("Mail transporter is not configured. Skipping order email.");
     return false;
   }
+
+  await verifyTransporterOnce();
 
   await activeTransporter.sendMail({
     from: MAIL_FROM || normalizeEmail(SMTP_USER) || ORDER_OWNER_EMAIL,
@@ -218,7 +311,7 @@ const sendOrderPlacedEmails = async ({ order, user, customerEmail }) => {
       </div>
     `,
   }).catch((error) => {
-    console.error("Owner order email failed:", error.message);
+    logMailErrorDetails("owner order email failed", error);
   });
 
   const customerMailPromise = normalizedCustomerEmail
@@ -241,13 +334,24 @@ const sendOrderPlacedEmails = async ({ order, user, customerEmail }) => {
           </div>
         `,
       }).catch((error) => {
-        console.error("Customer order email failed:", error.message);
+        logMailErrorDetails("customer order email failed", error);
       })
     : Promise.resolve();
 
   await Promise.allSettled([ownerMailPromise, customerMailPromise]);
 };
 
+const runMailDiagnostics = async () => {
+  try {
+    await verifyTransporterOnce();
+    console.log("[mail] diagnostics completed successfully");
+  } catch (error) {
+    logMailErrorDetails("mail diagnostics failed", error);
+    throw error;
+  }
+};
+
 module.exports = {
+  runMailDiagnostics,
   sendOrderPlacedEmails,
 };
