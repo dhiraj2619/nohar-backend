@@ -1,6 +1,7 @@
 const Order = require("../models/order.model");
 const ShippingInfo = require("../models/shippingInfo.model");
 const User = require("../models/users.model");
+const { sendOrderPlacedEmails } = require("../services/mail.service");
 const { sendPushToUsers } = require("../services/notification.service");
 
 const normalizeNumber = (value) => {
@@ -185,6 +186,12 @@ const createOrder = async (req, res) => {
         .json({ success: false, message: "Payment ID is required" });
     }
 
+    const customer = await User.findById(userId).select("_id fullName email phone fcmToken");
+
+    if (!customer) {
+      return res.status(404).json({ success: false, message: "User not found" });
+    }
+
     const shippingInfo = await ShippingInfo.findById(shippingId);
 
     if (!shippingInfo) {
@@ -276,7 +283,10 @@ const createOrder = async (req, res) => {
     }
 
     await order.save();
-    await notifyOrderUser(userId, order, "ORDER_PLACED");
+    await Promise.allSettled([
+      notifyOrderUser(userId, order, "ORDER_PLACED"),
+      sendOrderPlacedEmails({ order, user: customer }),
+    ]);
 
     res.status(201).json({
       success: true,
