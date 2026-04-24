@@ -9,7 +9,7 @@ const {
   SMTP_USER,
 } = require("../config/config");
 
-const transporters = new Map();
+let transporter;
 
 const formatCurrency = (amount) => {
   const numericAmount = Number(amount || 0);
@@ -95,24 +95,15 @@ const getExpectedDeliveryText = (order) => {
   return `Expected to deliver within 5 to 7 business days (${formatShortDate(start)} - ${formatShortDate(end)}).`;
 };
 
-const getTransportOptionsList = () => {
-  const normalizedHost = normalizeEmail(SMTP_HOST);
-  const normalizedPort = Number(SMTP_PORT);
+const createTransporter = () => {
   const normalizedUser = normalizeEmail(SMTP_USER);
   const normalizedPass = normalizeSmtpPass(SMTP_PASS);
 
-  if (!normalizedHost || !normalizedPort || !normalizedUser || !normalizedPass) {
-    return [];
+  if (!normalizedUser || !normalizedPass) {
+    return null;
   }
 
-  const configuredSecure =
-    String(SMTP_SECURE).toLowerCase() === "true" || normalizedPort === 465;
-
-  const primaryTransport = {
-    id: `primary:${normalizedHost}:${normalizedPort}:${configuredSecure}`,
-    host: normalizedHost,
-    port: normalizedPort,
-    secure: configuredSecure,
+  const commonOptions = {
     auth: {
       user: normalizedUser,
       pass: normalizedPass,
@@ -120,88 +111,51 @@ const getTransportOptionsList = () => {
     connectionTimeout: 10000,
     greetingTimeout: 10000,
     socketTimeout: 15000,
-    family: 4,
   };
 
-  const gmailFallbacks =
-    normalizedHost === "smtp.gmail.com"
-      ? [
-          {
-            id: "gmail:465:true",
-            host: "smtp.gmail.com",
-            port: 465,
-            secure: true,
-            auth: {
-              user: normalizedUser,
-              pass: normalizedPass,
-            },
-            connectionTimeout: 10000,
-            greetingTimeout: 10000,
-            socketTimeout: 15000,
-            family: 4,
-          },
-          {
-            id: "gmail:587:false",
-            host: "smtp.gmail.com",
-            port: 587,
-            secure: false,
-            requireTLS: true,
-            auth: {
-              user: normalizedUser,
-              pass: normalizedPass,
-            },
-            connectionTimeout: 10000,
-            greetingTimeout: 10000,
-            socketTimeout: 15000,
-            family: 4,
-          },
-        ]
-      : [];
-
-  return [primaryTransport, ...gmailFallbacks].filter(
-    (option, index, list) =>
-      list.findIndex((candidate) => candidate.id === option.id) === index,
-  );
-};
-
-const getTransporter = (transportOptions) => {
-  if (transporters.has(transportOptions.id)) {
-    return transporters.get(transportOptions.id);
+  if (normalizedUser.toLowerCase().endsWith("@gmail.com")) {
+    return nodemailer.createTransport({
+      service: "gmail",
+      ...commonOptions,
+    });
   }
 
-  const transporter = nodemailer.createTransport(transportOptions);
-  transporters.set(transportOptions.id, transporter);
+  if (!SMTP_HOST || !SMTP_PORT) {
+    return null;
+  }
+
+  return nodemailer.createTransport({
+    host: SMTP_HOST,
+    port: Number(SMTP_PORT),
+    secure:
+      String(SMTP_SECURE).toLowerCase() === "true" || Number(SMTP_PORT) === 465,
+    ...commonOptions,
+  });
+};
+
+const getTransporter = () => {
+  if (transporter) {
+    return transporter;
+  }
+
+  transporter = createTransporter();
   return transporter;
 };
 
 const sendMailSafely = async (mailOptions) => {
-  const transportOptionsList = getTransportOptionsList();
+  const activeTransporter = getTransporter();
 
-  if (!transportOptionsList.length) {
+  if (!activeTransporter) {
     console.warn("Mail transporter is not configured. Skipping order email.");
     return false;
   }
 
-  let lastError;
+  await activeTransporter.sendMail({
+    from: MAIL_FROM || normalizeEmail(SMTP_USER) || ORDER_OWNER_EMAIL,
+    ...mailOptions,
+  });
 
-  for (const transportOptions of transportOptionsList) {
-    try {
-      const activeTransporter = getTransporter(transportOptions);
-      await activeTransporter.sendMail({
-        from: MAIL_FROM || normalizeEmail(SMTP_USER) || ORDER_OWNER_EMAIL,
-        ...mailOptions,
-      });
-      return true;
-    } catch (error) {
-      lastError = error;
-      console.error(
-        `Mail send failed via ${transportOptions.host}:${transportOptions.port} secure=${transportOptions.secure}:`,
-        error.message,
-      );
-    }
-  }
-
-  throw lastError;
+  return true;
 };
 
 const buildOrderItemsText = (order) =>
