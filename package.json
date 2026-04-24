@@ -8,8 +8,7 @@
   "main": "index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "start": "nodemon index.js",
-    "mail:test": "node scripts/test-mail.js"
+    "start": "nodemon index.js"
   },
   "dependencies": {
     "axios": "^1.13.2",

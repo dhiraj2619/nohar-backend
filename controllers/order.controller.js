@@ -1,4 +1,4 @@
-const nodemailer = require("nodemailer");
+﻿const nodemailer = require("nodemailer");
 const Order = require("../models/order.model");
 const ShippingInfo = require("../models/shippingInfo.model");
 const User = require("../models/users.model");
@@ -239,11 +239,11 @@ const sendMail = async (mailOptions) => {
   });
 };
 
-const sendOrderEmailSms = async ({ order, customer, customerEmail }) => {
+const sendOrderPlacedEmails = async ({ order, customer, customerEmail }) => {
   try {
     const orderNumber = getOrderNumber(order);
     const customerName = customer?.fullName || "Customer";
-    const normalizedCustomerEmail = normalizeEmail(customerEmail || customer?.email || "");
+    const normalizedCustomerEmail = normalizeEmail(customer?.email || customerEmail || "");
     const orderItemsText = getOrderItemsText(order) || "No order items available";
     const orderItemsHtml = getOrderItemsHtml(order) || "<li>No order items available</li>";
     const shippingAddress = [
@@ -332,7 +332,7 @@ const sendOrderEmailSms = async ({ order, customer, customerEmail }) => {
 
     await Promise.allSettled(tasks);
   } catch (error) {
-    console.error("sendOrderEmailSms failed:", {
+    console.error("sendOrderPlacedEmails failed:", {
       message: error?.message,
       code: error?.code,
       command: error?.command,
@@ -404,7 +404,7 @@ const runPostOrderTasks = ({ userId, order, customer, customerEmail }) => {
   setImmediate(async () => {
     await Promise.allSettled([
       notifyOrderUser(userId, order, "ORDER_PLACED"),
-      sendOrderEmailSms({
+      sendOrderPlacedEmails({
         order,
         customer,
         customerEmail,
