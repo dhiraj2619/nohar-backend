@@ -1,13 +1,27 @@
+const nodemailer = require("nodemailer");
 const Order = require("../models/order.model");
 const ShippingInfo = require("../models/shippingInfo.model");
 const User = require("../models/users.model");
-const { sendOrderPlacedEmails } = require("../services/mail.service");
+const {
+  MAIL_FROM,
+  ORDER_OWNER_EMAIL,
+  SMTP_HOST,
+  SMTP_PASS,
+  SMTP_PORT,
+  SMTP_SECURE,
+  SMTP_USER,
+} = require("../config/config");
 const { sendPushToUsers } = require("../services/notification.service");
+
+let mailTransporter;
 
 const normalizeNumber = (value) => {
   const numericValue = Number(value);
   return Number.isNaN(numericValue) ? null : numericValue;
 };
+
+const normalizeEmail = (value) => String(value || "").trim();
+const normalizeSmtpPass = (value) => String(value || "").replace(/\s+/g, "").trim();
 
 const ORDER_PHASES = [
   "ORDER_PLACED",
@@ -81,6 +95,250 @@ const applyOrderStatusSideEffects = (order, nextStatus) => {
 };
 
 const getShortOrderId = (order) => String(order?._id || "").slice(-6).toUpperCase();
+const getOrderNumber = (order) => order?.orderNumber || getShortOrderId(order);
+
+const formatCurrency = (amount) => {
+  const numericAmount = Number(amount || 0);
+  return `Rs. ${numericAmount.toFixed(2)}`;
+};
+
+const escapeHtml = (value) =>
+  String(value || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/\"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+
+const addBusinessDays = (dateInput, businessDays) => {
+  const date = new Date(dateInput);
+
+  if (Number.isNaN(date.getTime())) {
+    return null;
+  }
+
+  let remainingDays = businessDays;
+
+  while (remainingDays > 0) {
+    date.setDate(date.getDate() + 1);
+    const day = date.getDay();
+
+    if (day !== 0 && day !== 6) {
+      remainingDays -= 1;
+    }
+  }
+
+  return date;
+};
+
+const formatShortDate = (value) => {
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) {
+    return "";
+  }
+
+  return date.toLocaleDateString("en-IN", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+  });
+};
+
+const getExpectedDeliveryText = (order) => {
+  const placedAt = order?.createdAt || order?.paidAt || new Date();
+  const start = addBusinessDays(placedAt, 5);
+  const end = addBusinessDays(placedAt, 7);
+
+  if (!start || !end) {
+    return "Expected to deliver within 5 to 7 business days.";
+  }
+
+  return `Expected to deliver within 5 to 7 business days (${formatShortDate(start)} - ${formatShortDate(end)}).`;
+};
+
+const getOrderItemsText = (order) =>
+  (order?.orderItems || [])
+    .map((item, index) => {
+      const quantity = Number(item?.quantity || 0);
+      const price = Number(item?.price || 0);
+      const total = quantity * price;
+      return `${index + 1}. ${item?.name || "Product"} | Qty: ${quantity} | Price: ${formatCurrency(price)} | Total: ${formatCurrency(total)}`;
+    })
+    .join("\n");
+
+const getOrderItemsHtml = (order) =>
+  (order?.orderItems || [])
+    .map((item, index) => {
+      const quantity = Number(item?.quantity || 0);
+      const price = Number(item?.price || 0);
+      const total = quantity * price;
+      return `<li style="margin-bottom:8px;">${index + 1}. ${escapeHtml(item?.name || "Product")} | Qty: ${quantity} | Price: ${formatCurrency(price)} | Total: ${formatCurrency(total)}</li>`;
+    })
+    .join("");
+
+const getMailTransporter = () => {
+  if (mailTransporter) {
+    return mailTransporter;
+  }
+
+  const normalizedUser = normalizeEmail(SMTP_USER);
+  const normalizedPass = normalizeSmtpPass(SMTP_PASS);
+
+  if (!normalizedUser || !normalizedPass) {
+    return null;
+  }
+
+  if (normalizedUser.toLowerCase().endsWith("@gmail.com")) {
+    mailTransporter = nodemailer.createTransport({
+      service: "gmail",
+      auth: {
+        user: normalizedUser,
+        pass: normalizedPass,
+      },
+      connectionTimeout: 10000,
+      greetingTimeout: 10000,
+      socketTimeout: 15000,
+    });
+
+    return mailTransporter;
+  }
+
+  if (!SMTP_HOST || !SMTP_PORT) {
+    return null;
+  }
+
+  mailTransporter = nodemailer.createTransport({
+    host: SMTP_HOST,
+    port: Number(SMTP_PORT),
+    secure:
+      String(SMTP_SECURE).toLowerCase() === "true" || Number(SMTP_PORT) === 465,
+    auth: {
+      user: normalizedUser,
+      pass: normalizedPass,
+    },
+    connectionTimeout: 10000,
+    greetingTimeout: 10000,
+    socketTimeout: 15000,
+  });
+
+  return mailTransporter;
+};
+
+const sendMail = async (mailOptions) => {
+  const transporter = getMailTransporter();
+
+  if (!transporter) {
+    console.warn("[order-email] mail transporter not configured");
+    return false;
+  }
+
+  return transporter.sendMail({
+    from: MAIL_FROM || normalizeEmail(SMTP_USER) || ORDER_OWNER_EMAIL,
+    ...mailOptions,
+  });
+};
+
+const sendOrderEmailSms = async ({ order, customer, customerEmail }) => {
+  try {
+    const orderNumber = getOrderNumber(order);
+    const customerName = customer?.fullName || "Customer";
+    const normalizedCustomerEmail = normalizeEmail(customerEmail || customer?.email || "");
+    const orderItemsText = getOrderItemsText(order) || "No order items available";
+    const orderItemsHtml = getOrderItemsHtml(order) || "<li>No order items available</li>";
+    const shippingAddress = [
+      order?.shippingInfo?.flatNo,
+      order?.shippingInfo?.area,
+      order?.shippingInfo?.landmark,
+      order?.shippingInfo?.city,
+      order?.shippingInfo?.state,
+      order?.shippingInfo?.pincode,
+      order?.shippingInfo?.country,
+    ]
+      .filter(Boolean)
+      .join(", ");
+    const expectedDeliveryText = getExpectedDeliveryText(order);
+
+    const tasks = [];
+
+    tasks.push(
+      sendMail({
+        to: ORDER_OWNER_EMAIL,
+        subject: `New order placed - ${orderNumber}`,
+        text: [
+          "New order placed",
+          `Customer name: ${customerName}`,
+          `Customer phone: ${customer?.phone || order?.shippingInfo?.mobile || "N/A"}`,
+          `Customer email: ${normalizedCustomerEmail || "N/A"}`,
+          `Order number: ${orderNumber}`,
+          `Order details:`,
+          orderItemsText,
+          `Shipping address: ${shippingAddress || "N/A"}`,
+          `Total amount: ${formatCurrency(order?.totalPrice)}`,
+        ].join("\n"),
+        html: `
+          <div style="font-family:Arial,sans-serif;color:#222;line-height:1.6;">
+            <h2>New order placed</h2>
+            <p><strong>Customer name:</strong> ${escapeHtml(customerName)}</p>
+            <p><strong>Customer phone:</strong> ${escapeHtml(customer?.phone || order?.shippingInfo?.mobile || "N/A")}</p>
+            <p><strong>Customer email:</strong> ${escapeHtml(normalizedCustomerEmail || "N/A")}</p>
+            <p><strong>Order number:</strong> ${escapeHtml(orderNumber)}</p>
+            <p><strong>Order details:</strong></p>
+            <ul>${orderItemsHtml}</ul>
+            <p><strong>Shipping address:</strong> ${escapeHtml(shippingAddress || "N/A")}</p>
+            <p><strong>Total amount:</strong> ${formatCurrency(order?.totalPrice)}</p>
+          </div>
+        `,
+      }).catch((error) => {
+        console.error("Owner order email failed:", {
+          message: error?.message,
+          code: error?.code,
+          command: error?.command,
+        });
+      }),
+    );
+
+    if (normalizedCustomerEmail) {
+      tasks.push(
+        sendMail({
+          to: normalizedCustomerEmail,
+          subject: `Thank you for placing your order - ${orderNumber}`,
+          text: [
+            `Thank you for placing order to Nohar Cosmetics, your order number is ${orderNumber}.`,
+            "Order details:",
+            orderItemsText,
+            expectedDeliveryText,
+          ].join("\n"),
+          html: `
+            <div style="font-family:Arial,sans-serif;color:#222;line-height:1.6;">
+              <h2>Thank you for placing your order with Nohar Cosmetics</h2>
+              <p>Your order number is <strong>${escapeHtml(orderNumber)}</strong>.</p>
+              <p><strong>Order details:</strong></p>
+              <ul>${orderItemsHtml}</ul>
+              <p>${escapeHtml(expectedDeliveryText)}</p>
+            </div>
+          `,
+        }).catch((error) => {
+          console.error("Customer order email failed:", {
+            message: error?.message,
+            code: error?.code,
+            command: error?.command,
+          });
+        }),
+      );
+    } else {
+      console.warn("Customer order email skipped: user email not found");
+    }
+
+    await Promise.allSettled(tasks);
+  } catch (error) {
+    console.error("sendOrderEmailSms failed:", {
+      message: error?.message,
+      code: error?.code,
+      command: error?.command,
+    });
+  }
+};
 
 const buildOrderNotificationContent = (status, order) => {
   const shortOrderId = getShortOrderId(order);
@@ -146,9 +404,9 @@ const runPostOrderTasks = ({ userId, order, customer, customerEmail }) => {
   setImmediate(async () => {
     await Promise.allSettled([
       notifyOrderUser(userId, order, "ORDER_PLACED"),
-      sendOrderPlacedEmails({
+      sendOrderEmailSms({
         order,
-        user: customer,
+        customer,
         customerEmail,
       }),
     ]);
