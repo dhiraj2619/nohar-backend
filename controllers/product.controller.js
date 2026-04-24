@@ -111,6 +111,8 @@ const createProduct = async (req, res) => {
       name,
       description,
       price,
+      gst,
+      gstIncluded,
       offerpercent,
       offerprice,
       categoryId,
@@ -233,6 +235,9 @@ const createProduct = async (req, res) => {
       name: name.trim(),
       description,
       price: normalizedPrice,
+      gst: toNumber(gst, 0),
+      gstIncluded:
+        gstIncluded !== undefined ? toBoolean(gstIncluded) : true,
       offerpercent: normalizedOfferPercent,
       offerprice:
         offerprice !== undefined
@@ -289,6 +294,8 @@ const updateProduct = async (req, res) => {
       name,
       description,
       price,
+      gst,
+      gstIncluded,
       offerpercent,
       offerprice,
       categoryId,
@@ -474,6 +481,9 @@ const updateProduct = async (req, res) => {
     if (name !== undefined) product.name = name.trim();
     if (description !== undefined) product.description = description;
     if (price !== undefined) product.price = toNumber(price, product.price);
+    if (gst !== undefined) product.gst = toNumber(gst, product.gst);
+    if (gstIncluded !== undefined)
+      product.gstIncluded = toBoolean(gstIncluded);
     if (offerpercent !== undefined) {
       product.offerpercent = toNumber(offerpercent, product.offerpercent);
     }
