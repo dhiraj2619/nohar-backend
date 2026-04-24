@@ -404,11 +404,6 @@ const runPostOrderTasks = ({ userId, order, customer, customerEmail }) => {
   setImmediate(async () => {
     await Promise.allSettled([
       notifyOrderUser(userId, order, "ORDER_PLACED"),
-      sendOrderPlacedEmails({
-        order,
-        customer,
-        customerEmail,
-      }),
     ]);
   });
 };
