@@ -141,13 +141,12 @@ const productSchema = new mongoose.Schema(
   { timestamps: true },
 );
 
-productSchema.pre("save", function setFinalPrice(next) {
+productSchema.pre("save", function setFinalPrice() {
   this.finalPrice = calculateFinalPrice(
     this.price,
     this.gstRate,
     this.gstIncluded,
   );
-  next();
 });
 
 const Product = mongoose.model("Product", productSchema);
