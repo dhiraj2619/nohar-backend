@@ -14,7 +14,11 @@ collectionRouter.post(
   createCollection,
 );
 collectionRouter.get("/get-all", getAllCollections);
-collectionRouter.put("/update/:id", updateCollection);
+collectionRouter.put(
+  "/update/:id",
+  upload.fields([{ name: "thumbnail", maxCount: 1 }]),
+  updateCollection,
+);
 collectionRouter.delete("/delete/:id", deleteCollection);
 
 module.exports = { collectionRouter };

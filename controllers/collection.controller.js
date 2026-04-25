@@ -1,5 +1,12 @@
 const Collection = require("../models/collection.model");
 const Cloudinary = require("cloudinary");
+const mongoose = require("mongoose");
+
+const toBoolean = (value) => {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "string") return value.toLowerCase() === "true";
+  return Boolean(value);
+};
 
 const createCollection = async (req, res) => {
   try {
@@ -34,7 +41,7 @@ const createCollection = async (req, res) => {
 
     const newCollection = await Collection.create({
       name: name.trim(),
-      isActive,
+      isActive: toBoolean(isActive),
       thumbnail: {
         public_id: thumbnailResult.public_id,
         url: thumbnailResult.secure_url,
@@ -62,6 +69,13 @@ const updateCollection = async (req, res) => {
   try {
     const { id } = req.params;
     const { name, isActive } = req.body;
+
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid collection id",
+      });
+    }
 
     if (!name || isActive === undefined) {
       return res.status(400).json({
@@ -114,7 +128,7 @@ const updateCollection = async (req, res) => {
     }
 
     existingCollection.name = name.trim();
-    existingCollection.isActive = isActive;
+    existingCollection.isActive = toBoolean(isActive);
     existingCollection.thumbnail = thumbnail;
 
     const updatedCollection = await existingCollection.save();
@@ -137,6 +151,14 @@ const updateCollection = async (req, res) => {
 const deleteCollection = async (req, res) => {
   try {
     const { id } = req.params;
+
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid collection id",
+      });
+    }
+
     const deletedCollection = await Collection.findByIdAndDelete(id);
 
     if (!deletedCollection) {
@@ -144,6 +166,10 @@ const deleteCollection = async (req, res) => {
         success: false,
         message: "Collection not found",
       });
+    }
+
+    if (deletedCollection.thumbnail?.public_id) {
+      await Cloudinary.v2.uploader.destroy(deletedCollection.thumbnail.public_id);
     }
 
     return res.status(200).json({

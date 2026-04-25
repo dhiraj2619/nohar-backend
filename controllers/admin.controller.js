@@ -241,9 +241,40 @@ const getNotificationRecipients = async (req, res) => {
   }
 };
 
+const getCustomers = async (req, res) => {
+  try {
+    const users = await User.find()
+      .select("_id fullName email phone isActive fcmToken createdAt updatedAt")
+      .sort({ createdAt: -1 });
+
+    return res.status(200).json({
+      success: true,
+      count: users.length,
+      data: users.map((user) => ({
+        _id: user._id,
+        fullName: user.fullName,
+        email: user.email,
+        phone: user.phone,
+        isActive: user.isActive,
+        hasFcmToken: Boolean(user.fcmToken),
+        createdAt: user.createdAt,
+        updatedAt: user.updatedAt,
+      })),
+    });
+  } catch (error) {
+    console.error("Error fetching customers:", error);
+    return res.status(500).json({
+      success: false,
+      message: "An error occurred while fetching customers",
+      error: error.message,
+    });
+  }
+};
+
 module.exports = {
   loginAdmin,
   getOwnerAdmin,
   sendManualNotification,
   getNotificationRecipients,
+  getCustomers,
 };
