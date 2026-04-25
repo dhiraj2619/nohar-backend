@@ -105,13 +105,33 @@ const getProductImageFiles = (files = {}) => {
   return [];
 };
 
-const applyProductGstDefaults = (product) => {
-  if (product.gst === undefined || product.gst === null) {
-    product.gst = 0;
+const normalizeProductPersistenceFields = (product) => ({
+  hsnCode: typeof product.hsnCode === "string" ? product.hsnCode : "",
+  gstRate: toNumber(product.gstRate, 0),
+  gstIncluded:
+    product.gstIncluded !== undefined ? Boolean(product.gstIncluded) : true,
+  discountprice: toNumber(product.discountprice, 0),
+  finalPrice: toNumber(product.finalPrice, 0),
+});
+
+const applyProductDefaults = (product) => {
+  const legacyGstRate = product.get("gst");
+  const legacyDiscountPrice = product.get("offerprice");
+
+  if (product.gstRate === undefined || product.gstRate === null) {
+    product.gstRate = toNumber(legacyGstRate, 0);
   }
 
   if (product.gstIncluded === undefined || product.gstIncluded === null) {
     product.gstIncluded = true;
+  }
+
+  if (product.hsnCode === undefined || product.hsnCode === null) {
+    product.hsnCode = "";
+  }
+
+  if (product.discountprice === undefined || product.discountprice === null) {
+    product.discountprice = toNumber(legacyDiscountPrice, 0);
   }
 };
 
@@ -121,10 +141,10 @@ const createProduct = async (req, res) => {
       name,
       description,
       price,
-      gst,
+      hsnCode,
+      gstRate,
       gstIncluded,
-      offerpercent,
-      offerprice,
+      discountprice,
       categoryId,
       collectionId,
       offers,
@@ -233,26 +253,19 @@ const createProduct = async (req, res) => {
     }
 
     const normalizedPrice = toNumber(price, 0);
-    const normalizedOfferPercent = toNumber(offerpercent, 0);
-    const calculatedOfferPrice = Number(
-      (
-        normalizedPrice -
-        (normalizedPrice * normalizedOfferPercent) / 100
-      ).toFixed(2),
-    );
 
     const newProduct = await Product.create({
       name: name.trim(),
       description,
       price: normalizedPrice,
-      gst: toNumber(gst, 0),
+      hsnCode: typeof hsnCode === "string" ? hsnCode.trim() : "",
+      gstRate: toNumber(gstRate, toNumber(req.body.gst, 0)),
       gstIncluded:
         gstIncluded !== undefined ? toBoolean(gstIncluded) : true,
-      offerpercent: normalizedOfferPercent,
-      offerprice:
-        offerprice !== undefined
-          ? toNumber(offerprice, 0)
-          : Math.max(calculatedOfferPrice, 0),
+      discountprice: toNumber(
+        discountprice !== undefined ? discountprice : req.body.offerprice,
+        0,
+      ),
       images: uploadedImages,
       guideImage,
       offers: offerIds,
@@ -304,10 +317,10 @@ const updateProduct = async (req, res) => {
       name,
       description,
       price,
-      gst,
+      hsnCode,
+      gstRate,
       gstIncluded,
-      offerpercent,
-      offerprice,
+      discountprice,
       categoryId,
       collectionId,
       offers,
@@ -491,14 +504,21 @@ const updateProduct = async (req, res) => {
     if (name !== undefined) product.name = name.trim();
     if (description !== undefined) product.description = description;
     if (price !== undefined) product.price = toNumber(price, product.price);
-    if (gst !== undefined) product.gst = toNumber(gst, product.gst);
+    if (hsnCode !== undefined) product.hsnCode = hsnCode.trim();
+    if (gstRate !== undefined || req.body.gst !== undefined) {
+      product.gstRate = toNumber(
+        gstRate !== undefined ? gstRate : req.body.gst,
+        product.gstRate,
+      );
+    }
     if (gstIncluded !== undefined)
       product.gstIncluded = toBoolean(gstIncluded);
-    if (offerpercent !== undefined) {
-      product.offerpercent = toNumber(offerpercent, product.offerpercent);
+    if (discountprice !== undefined || req.body.offerprice !== undefined) {
+      product.discountprice = toNumber(
+        discountprice !== undefined ? discountprice : req.body.offerprice,
+        product.discountprice,
+      );
     }
-    if (offerprice !== undefined)
-      product.offerprice = toNumber(offerprice, product.offerprice);
     if (offers !== undefined) product.offers = offerIds;
     if (productReviews !== undefined) {
       product.productReviews = parseArrayField(
@@ -514,9 +534,23 @@ const updateProduct = async (req, res) => {
       product.emiStartsAt = toNumber(emiStartsAt, product.emiStartsAt);
     if (isMostBuy !== undefined) product.isMostBuy = toBoolean(isMostBuy);
 
-    applyProductGstDefaults(product);
+    applyProductDefaults(product);
 
-    const updatedProduct = await product.save();
+    await product.save();
+
+    await Product.updateOne(
+      { _id: product._id },
+      {
+        $set: normalizeProductPersistenceFields(product),
+        $unset: {
+          offerpercent: 1,
+          offerprice: 1,
+          gst: 1,
+        },
+      },
+    );
+
+    const updatedProduct = await Product.findById(product._id);
 
     return res.status(200).json({
       success: true,
@@ -604,13 +638,27 @@ const updateMostBuyStatus = async (req, res) => {
     }
 
     product.isMostBuy = toBoolean(isMostBuy);
-    applyProductGstDefaults(product);
+    applyProductDefaults(product);
     await product.save();
+
+    await Product.updateOne(
+      { _id: product._id },
+      {
+        $set: normalizeProductPersistenceFields(product),
+        $unset: {
+          offerpercent: 1,
+          offerprice: 1,
+          gst: 1,
+        },
+      },
+    );
+
+    const updatedProduct = await Product.findById(product._id);
 
     return res.status(200).json({
       success: true,
       message: `Product most buy status updated to ${product.isMostBuy}`,
-      data: product,
+      data: updatedProduct,
     });
   } catch (error) {
     console.error("Error updating most buy status:", error);

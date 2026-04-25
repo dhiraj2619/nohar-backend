@@ -72,7 +72,7 @@ const getOffers = async (req, res) => {
     }
 
     const offers = await Offer.find(filter)
-      .populate("applicableProducts", "name price offerprice")
+      .populate("applicableProducts", "name price discountprice")
       .sort({ createdAt: -1 });
 
     return res.status(200).json({

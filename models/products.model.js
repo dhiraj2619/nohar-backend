@@ -1,13 +1,16 @@
 const mongoose = require("mongoose");
 
-const calculateFinalPrice = (price = 0, gst = 0, gstIncluded = true) => {
+const calculateFinalPrice = (price = 0, gstRate = 0, gstIncluded = true) => {
   const normalizedPrice = Number(price) || 0;
-  const normalizedGst = Number(gst) || 0;
+  const normalizedGstRate = Number(gstRate) || 0;
 
   if (!gstIncluded) return normalizedPrice;
 
   return Number(
-    (normalizedPrice + (normalizedPrice * normalizedGst) / 100).toFixed(2),
+    (
+      normalizedPrice +
+      (normalizedPrice * normalizedGstRate) / 100
+    ).toFixed(2),
   );
 };
 
@@ -28,7 +31,12 @@ const productSchema = new mongoose.Schema(
       required: true,
       min: 0,
     },
-    gst: {
+    hsnCode: {
+      type: String,
+      default: "",
+      trim: true,
+    },
+    gstRate: {
       type: Number,
       default: 0,
       min: 0,
@@ -42,13 +50,7 @@ const productSchema = new mongoose.Schema(
       default: 0,
       min: 0,
     },
-    offerpercent: {
-      type: Number,
-      default: 0,
-      min: 0,
-      max: 100,
-    },
-    offerprice: {
+    discountprice: {
       type: Number,
       default: 0,
       min: 0,
@@ -140,7 +142,11 @@ const productSchema = new mongoose.Schema(
 );
 
 productSchema.pre("save", function setFinalPrice(next) {
-  this.finalPrice = calculateFinalPrice(this.price, this.gst, this.gstIncluded);
+  this.finalPrice = calculateFinalPrice(
+    this.price,
+    this.gstRate,
+    this.gstIncluded,
+  );
   next();
 });
 
