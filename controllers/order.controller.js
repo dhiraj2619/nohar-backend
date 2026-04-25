@@ -1,6 +1,10 @@
 ﻿const nodemailer = require("nodemailer");
+const fs = require("fs");
+const path = require("path");
+const PDFDocument = require("pdfkit");
 const Order = require("../models/order.model");
 const ShippingInfo = require("../models/shippingInfo.model");
+const Setting = require("../models/settings.model");
 const User = require("../models/users.model");
 const {
   MAIL_FROM,
@@ -14,6 +18,19 @@ const {
 const { sendPushToUsers } = require("../services/notification.service");
 
 let mailTransporter;
+const INVOICE_LOGO_PATH = path.join(
+  __dirname,
+  "..",
+  "assets",
+  "invoice",
+  "nohar-logo.png",
+);
+const DEFAULT_STORE_DETAILS = {
+  storeName: "Nohar Cosmetics",
+  supportEmail: "noharcosmetics@gmail.com",
+  supportPhone: "7057319253",
+  address: "Dwarka Circle, Kathe Lane, Nashik, Maharashtra, India",
+};
 
 const normalizeNumber = (value) => {
   const numericValue = Number(value);
@@ -96,10 +113,22 @@ const applyOrderStatusSideEffects = (order, nextStatus) => {
 
 const getShortOrderId = (order) => String(order?._id || "").slice(-6).toUpperCase();
 const getOrderNumber = (order) => order?.orderNumber || getShortOrderId(order);
+const getInvoiceNumber = (order) => {
+  const orderNumber = String(getOrderNumber(order) || "")
+    .replace(/[^a-zA-Z0-9]/g, "")
+    .toUpperCase();
+
+  return `INV-${orderNumber || getShortOrderId(order)}`;
+};
 
 const formatCurrency = (amount) => {
   const numericAmount = Number(amount || 0);
   return `Rs. ${numericAmount.toFixed(2)}`;
+};
+
+const normalizeCurrencyValue = (amount) => {
+  const numericAmount = Number(amount || 0);
+  return Number.isNaN(numericAmount) ? 0 : numericAmount;
 };
 
 const escapeHtml = (value) =>
@@ -145,6 +174,22 @@ const formatShortDate = (value) => {
   });
 };
 
+const formatDateTime = (value) => {
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) {
+    return "--";
+  }
+
+  return date.toLocaleString("en-IN", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+};
+
 const getExpectedDeliveryText = (order) => {
   const placedAt = order?.createdAt || order?.paidAt || new Date();
   const start = addBusinessDays(placedAt, 5);
@@ -176,6 +221,404 @@ const getOrderItemsHtml = (order) =>
       return `<li style="margin-bottom:8px;">${index + 1}. ${escapeHtml(item?.name || "Product")} | Qty: ${quantity} | Price: ${formatCurrency(price)} | Total: ${formatCurrency(total)}</li>`;
     })
     .join("");
+
+const getStoreDetails = async () => {
+  const settings = await Setting.findOne().lean();
+
+  return {
+    storeName:
+      settings?.storeName?.trim() || DEFAULT_STORE_DETAILS.storeName,
+    supportEmail:
+      settings?.supportEmail?.trim() || DEFAULT_STORE_DETAILS.supportEmail,
+    supportPhone:
+      settings?.supportPhone?.trim() || DEFAULT_STORE_DETAILS.supportPhone,
+    address: settings?.address?.trim() || DEFAULT_STORE_DETAILS.address,
+  };
+};
+
+const getCustomerDisplayName = (customer, order) =>
+  customer?.fullName ||
+  order?.shippingInfo?.fullName ||
+  order?.shippingInfo?.name ||
+  "Customer";
+
+const getCustomerPhone = (customer, order) =>
+  customer?.phone || order?.shippingInfo?.mobile || "N/A";
+
+const getAddressLines = (address = {}) =>
+  [
+    address?.fullName || address?.name,
+    address?.flatNo,
+    address?.area,
+    address?.landmark,
+    [address?.city, address?.state].filter(Boolean).join(", "),
+    [address?.country, address?.pincode].filter(Boolean).join(" - "),
+    address?.mobile ? `Phone: ${address.mobile}` : "",
+  ].filter(Boolean);
+
+const drawTextLines = ({
+  doc,
+  lines,
+  x,
+  y,
+  width,
+  lineGap = 4,
+  font = "Helvetica",
+  size = 10,
+  color = "#3f3a37",
+  boldFirstLine = false,
+}) => {
+  let cursorY = y;
+
+  lines.forEach((line, index) => {
+    if (!line) {
+      return;
+    }
+
+    doc
+      .font(boldFirstLine && index === 0 ? "Helvetica-Bold" : font)
+      .fontSize(size)
+      .fillColor(color)
+      .text(String(line), x, cursorY, {
+        width,
+      });
+
+    cursorY = doc.y + lineGap;
+  });
+
+  return cursorY;
+};
+
+const drawInvoiceTable = ({
+  doc,
+  items,
+  startX,
+  startY,
+  contentWidth,
+}) => {
+  const columns = [
+    { label: "Sl.", width: 32, align: "left" },
+    { label: "Description", width: 220, align: "left" },
+    { label: "Qty", width: 42, align: "center" },
+    { label: "Rate", width: 86, align: "right" },
+    { label: "Amount", width: 100, align: "right" },
+  ];
+  const rowHeight = 28;
+
+  doc
+    .roundedRect(startX, startY, contentWidth, rowHeight, 8)
+    .fillAndStroke("#f4eee9", "#d7ccc5");
+
+  let cursorX = startX;
+
+  columns.forEach((column) => {
+    doc
+      .font("Helvetica-Bold")
+      .fontSize(10)
+      .fillColor("#5a4a42")
+      .text(column.label, cursorX + 8, startY + 9, {
+        width: column.width - 16,
+        align: column.align,
+      });
+    cursorX += column.width;
+  });
+
+  let cursorY = startY + rowHeight;
+
+  items.forEach((item, index) => {
+    const quantity = normalizeCurrencyValue(item?.quantity || 0);
+    const price = normalizeCurrencyValue(item?.price || 0);
+    const amount = quantity * price;
+
+    doc
+      .rect(startX, cursorY, contentWidth, rowHeight)
+      .fillAndStroke(index % 2 === 0 ? "#fffdfb" : "#fbf7f3", "#eadfd8");
+
+    let rowX = startX;
+    const values = [
+      String(index + 1),
+      item?.name || "Product",
+      String(quantity),
+      formatCurrency(price),
+      formatCurrency(amount),
+    ];
+
+    values.forEach((value, valueIndex) => {
+      const column = columns[valueIndex];
+      doc
+        .font("Helvetica")
+        .fontSize(10)
+        .fillColor("#2f2a27")
+        .text(value, rowX + 8, cursorY + 9, {
+          width: column.width - 16,
+          align: column.align,
+          ellipsis: true,
+        });
+      rowX += column.width;
+    });
+
+    cursorY += rowHeight;
+  });
+
+  return cursorY;
+};
+
+const buildInvoicePdf = async ({ order, customer, res }) => {
+  const storeDetails = await getStoreDetails();
+  const invoiceNumber = getInvoiceNumber(order);
+  const orderNumber = getOrderNumber(order);
+  const customerName = getCustomerDisplayName(customer, order);
+  const customerEmail = normalizeEmail(customer?.email || "");
+  const customerPhone = getCustomerPhone(customer, order);
+  const billingLines = [
+    customerName,
+    ...getAddressLines({
+      ...order?.shippingInfo,
+      fullName: customerName,
+      mobile: customerPhone,
+    }),
+    customerEmail ? `Email: ${customerEmail}` : "",
+  ].filter(Boolean);
+  const itemTotal = (order?.orderItems || []).reduce(
+    (sum, item) =>
+      sum +
+      normalizeCurrencyValue(item?.price) *
+        normalizeCurrencyValue(item?.quantity),
+    0,
+  );
+  const totalAmount = normalizeCurrencyValue(order?.totalPrice || itemTotal);
+  const shippingCharge = Number((totalAmount - itemTotal).toFixed(2));
+  const paymentLabel =
+    order?.paymentMode === "PARTIAL_COD"
+      ? "Partial COD"
+      : order?.paymentMode === "FULL"
+        ? "Online Payment"
+        : "Cash on Delivery";
+
+  const doc = new PDFDocument({
+    size: "A4",
+    margin: 36,
+  });
+
+  res.setHeader("Content-Type", "application/pdf");
+  res.setHeader(
+    "Content-Disposition",
+    `inline; filename="${invoiceNumber}.pdf"`,
+  );
+
+  doc.pipe(res);
+
+  const pageWidth =
+    doc.page.width - doc.page.margins.left - doc.page.margins.right;
+  const leftX = doc.page.margins.left;
+  const rightX = leftX + pageWidth - 170;
+
+  doc
+    .roundedRect(leftX, 28, pageWidth, 110, 18)
+    .fill("#f8f3ee");
+
+  if (fs.existsSync(INVOICE_LOGO_PATH)) {
+    doc.image(INVOICE_LOGO_PATH, leftX + 18, 46, {
+      fit: [118, 52],
+      align: "left",
+      valign: "center",
+    });
+  }
+
+  doc
+    .font("Helvetica-Bold")
+    .fontSize(22)
+    .fillColor("#2f2a27")
+    .text(storeDetails.storeName, leftX + 18, 104, {
+      width: 220,
+    });
+
+  doc
+    .font("Helvetica-Bold")
+    .fontSize(18)
+    .fillColor("#302b28")
+    .text("Tax Invoice", rightX, 48, {
+      width: 170,
+      align: "right",
+    });
+
+  const metaTop = 76;
+  const metaLabelWidth = 72;
+  const metaValueX = rightX + metaLabelWidth;
+  const invoiceMeta = [
+    ["Invoice No.", invoiceNumber],
+    ["Order No.", orderNumber],
+    ["Invoice Date", formatDateTime(order?.deliveredAt || order?.createdAt)],
+    ["Payment", paymentLabel],
+  ];
+
+  invoiceMeta.forEach(([label, value], index) => {
+    const rowY = metaTop + index * 16;
+
+    doc
+      .font("Helvetica-Bold")
+      .fontSize(9)
+      .fillColor("#6a5f59")
+      .text(label, rightX, rowY, {
+        width: metaLabelWidth - 6,
+      });
+
+    doc
+      .font("Helvetica")
+      .fontSize(9)
+      .fillColor("#2f2a27")
+      .text(value, metaValueX, rowY, {
+        width: 98,
+        align: "right",
+      });
+  });
+
+  const sectionTop = 166;
+  const boxWidth = (pageWidth - 12) / 2;
+
+  doc
+    .roundedRect(leftX, sectionTop, boxWidth, 120, 14)
+    .fillAndStroke("#fffdfb", "#eadfd8");
+  doc
+    .roundedRect(leftX + boxWidth + 12, sectionTop, boxWidth, 120, 14)
+    .fillAndStroke("#fffdfb", "#eadfd8");
+
+  doc
+    .font("Helvetica-Bold")
+    .fontSize(11)
+    .fillColor("#4c4039")
+    .text("Sold By", leftX + 16, sectionTop + 14);
+  drawTextLines({
+    doc,
+    lines: [
+      storeDetails.storeName,
+      storeDetails.address,
+      `Phone: ${storeDetails.supportPhone}`,
+      `Email: ${storeDetails.supportEmail}`,
+    ],
+    x: leftX + 16,
+    y: sectionTop + 34,
+    width: boxWidth - 32,
+    boldFirstLine: true,
+  });
+
+  doc
+    .font("Helvetica-Bold")
+    .fontSize(11)
+    .fillColor("#4c4039")
+    .text("Billing & Shipping Address", leftX + boxWidth + 28, sectionTop + 14);
+  drawTextLines({
+    doc,
+    lines: billingLines,
+    x: leftX + boxWidth + 28,
+    y: sectionTop + 34,
+    width: boxWidth - 32,
+    boldFirstLine: true,
+  });
+
+  let cursorY = sectionTop + 146;
+
+  doc
+    .font("Helvetica-Bold")
+    .fontSize(12)
+    .fillColor("#4c4039")
+    .text("Items", leftX, cursorY);
+
+  cursorY = drawInvoiceTable({
+    doc,
+    items: order?.orderItems || [],
+    startX: leftX,
+    startY: cursorY + 14,
+    contentWidth: pageWidth,
+  });
+
+  const totalsTop = cursorY + 18;
+  const totalsBoxWidth = 230;
+  const totalsX = leftX + pageWidth - totalsBoxWidth;
+  const totals = [
+    ["Items Total", formatCurrency(itemTotal)],
+    ["Shipping", shippingCharge > 0 ? formatCurrency(shippingCharge) : "Free"],
+    ["Amount Paid", formatCurrency(order?.amountPaid || 0)],
+    ["Amount Due", formatCurrency(order?.amountDue || 0)],
+    ["Grand Total", formatCurrency(totalAmount)],
+  ];
+
+  doc
+    .roundedRect(totalsX, totalsTop, totalsBoxWidth, 118, 14)
+    .fillAndStroke("#f8f3ee", "#eadfd8");
+
+  totals.forEach(([label, value], index) => {
+    const rowY = totalsTop + 16 + index * 18;
+    const isGrandTotal = index === totals.length - 1;
+
+    doc
+      .font(isGrandTotal ? "Helvetica-Bold" : "Helvetica")
+      .fontSize(isGrandTotal ? 11 : 10)
+      .fillColor(isGrandTotal ? "#2f2a27" : "#645955")
+      .text(label, totalsX + 14, rowY, {
+        width: 108,
+      });
+
+    doc
+      .font(isGrandTotal ? "Helvetica-Bold" : "Helvetica")
+      .fontSize(isGrandTotal ? 11 : 10)
+      .fillColor("#2f2a27")
+      .text(value, totalsX + 120, rowY, {
+        width: 96,
+        align: "right",
+      });
+  });
+
+  const notesTop = totalsTop + 138;
+
+  doc
+    .font("Helvetica-Bold")
+    .fontSize(11)
+    .fillColor("#4c4039")
+    .text("Notes", leftX, notesTop);
+
+  drawTextLines({
+    doc,
+    lines: [
+      `Order delivered on ${formatDateTime(order?.deliveredAt || order?.updatedAt)}.`,
+      "This is a computer generated invoice from the Nohar app.",
+      "For support, contact us using the details above.",
+    ],
+    x: leftX,
+    y: notesTop + 18,
+    width: pageWidth - totalsBoxWidth - 24,
+    size: 10,
+  });
+
+  doc
+    .font("Helvetica-Bold")
+    .fontSize(11)
+    .fillColor("#4c4039")
+    .text(storeDetails.storeName, totalsX, notesTop + 4, {
+      width: totalsBoxWidth,
+      align: "right",
+    });
+
+  doc
+    .font("Helvetica")
+    .fontSize(10)
+    .fillColor("#7c7069")
+    .text("Authorized Signatory", totalsX, notesTop + 42, {
+      width: totalsBoxWidth,
+      align: "right",
+    });
+
+  doc
+    .font("Helvetica")
+    .fontSize(9)
+    .fillColor("#8e817a")
+    .text("Thank you for shopping with Nohar.", leftX, 780, {
+      width: pageWidth,
+      align: "center",
+    });
+
+  doc.end();
+};
 
 const getMailTransporter = () => {
   if (mailTransporter) {
@@ -642,6 +1085,57 @@ const getUserOrders = async (req, res) => {
   }
 };
 
+const downloadOrderInvoice = async (req, res) => {
+  try {
+    const { orderId } = req.params;
+
+    const order = await Order.findById(orderId).populate(
+      "user",
+      "_id fullName email phone",
+    );
+
+    if (!order) {
+      return res.status(404).json({
+        success: false,
+        message: "Order not found",
+      });
+    }
+
+    if (String(order.user?._id) !== String(req.user?._id)) {
+      return res.status(403).json({
+        success: false,
+        message: "You are not allowed to access this invoice",
+      });
+    }
+
+    if (normalizeOrderStatus(order.orderStatus) !== "DELIVERED") {
+      return res.status(400).json({
+        success: false,
+        message: "Invoice is available only after the order is delivered",
+      });
+    }
+
+    await buildInvoicePdf({
+      order,
+      customer: order.user,
+      res,
+    });
+  } catch (error) {
+    console.error("downloadOrderInvoice failed:", {
+      message: error?.message,
+    });
+
+    if (!res.headersSent) {
+      return res.status(500).json({
+        success: false,
+        message: "Failed to generate invoice",
+      });
+    }
+
+    return res.end();
+  }
+};
+
 const updateOrderStatus = async (req, res) => {
   try {
     const { orderId } = req.params;
@@ -743,6 +1237,7 @@ module.exports = {
   cancelOrder,
   getOrders,
   getUserOrders,
+  downloadOrderInvoice,
   updateOrderStatus,
   advanceOrderPhase,
 };
