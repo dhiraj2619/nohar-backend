@@ -105,6 +105,16 @@ const getProductImageFiles = (files = {}) => {
   return [];
 };
 
+const applyProductGstDefaults = (product) => {
+  if (product.gst === undefined || product.gst === null) {
+    product.gst = 0;
+  }
+
+  if (product.gstIncluded === undefined || product.gstIncluded === null) {
+    product.gstIncluded = true;
+  }
+};
+
 const createProduct = async (req, res) => {
   try {
     const {
@@ -504,6 +514,8 @@ const updateProduct = async (req, res) => {
       product.emiStartsAt = toNumber(emiStartsAt, product.emiStartsAt);
     if (isMostBuy !== undefined) product.isMostBuy = toBoolean(isMostBuy);
 
+    applyProductGstDefaults(product);
+
     const updatedProduct = await product.save();
 
     return res.status(200).json({
@@ -592,6 +604,7 @@ const updateMostBuyStatus = async (req, res) => {
     }
 
     product.isMostBuy = toBoolean(isMostBuy);
+    applyProductGstDefaults(product);
     await product.save();
 
     return res.status(200).json({
