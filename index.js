@@ -21,6 +21,7 @@ const { userRouter } = require("./routes/user.route");
 const { shippingRouter } = require("./routes/shipping.route");
 const { paymentRouter } = require("./routes/payment.route");
 const orderRouter = require("./routes/order.route");
+const { notificationRouter } = require("./routes/notification.route");
 const { initializeFirebase } = require("./services/notification.service");
 
 const app = express();
@@ -55,6 +56,7 @@ app.use("/api/v1/orders", orderRouter);
 
 // admin routes
 app.use("/api/v1/admin", adminRouter);
+app.use("/api/v1/admin/notifications", notificationRouter);
 
 app.listen(port, () => {
   console.log(`server is running on http://localhost:${port}`);
