@@ -29,20 +29,53 @@ const uploadAdImage = async (file) => {
   };
 };
 
+const serializeAd = (ad) => {
+  const source = typeof ad?.toObject === "function" ? ad.toObject() : ad;
+  const normalizedVideoLink = normalizeVideoLink(source?.videoLink) ?? null;
+
+  return {
+    ...source,
+    videoLink: normalizedVideoLink,
+    videoUrl: normalizedVideoLink,
+    youtubeUrl: normalizedVideoLink,
+  };
+};
+
 const getAds = async (req, res) => {
   try {
     const ads = await Ad.find().sort({ createdAt: -1 });
+    const serializedAds = ads.map(serializeAd);
 
     return res.status(200).json({
       success: true,
-      count: ads.length,
-      data: ads,
+      count: serializedAds.length,
+      data: serializedAds,
     });
   } catch (error) {
     console.error("Error fetching ads:", error);
     return res.status(500).json({
       success: false,
       message: "An error occurred while fetching ads",
+      error: error.message,
+    });
+  }
+};
+
+const getActiveAds = async (req, res) => {
+  try {
+    const ads = await Ad.find({ isActive: true }).sort({ createdAt: -1 });
+    const serializedAds = ads.map(serializeAd);
+
+    return res.status(200).json({
+      success: true,
+      count: serializedAds.length,
+      data: serializedAds,
+    });
+  } catch (error) {
+    console.error("Error fetching active ads:", error);
+    return res.status(500).json({
+      success: false,
+      message: "An error occurred while fetching active ads",
       error: error.message,
     });
   }
@@ -71,7 +104,7 @@ const createAd = async (req, res) => {
     return res.status(201).json({
       success: true,
       message: "Ad created successfully",
-      data: ad,
+      data: serializeAd(ad),
     });
   } catch (error) {
     console.error("Error creating ad:", error);
@@ -146,7 +179,7 @@ const updateAd = async (req, res) => {
     return res.status(200).json({
       success: true,
       message: "Ad updated successfully",
-      data: ad,
+      data: serializeAd(ad),
     });
   } catch (error) {
     console.error("Error updating ad:", error);
@@ -185,7 +218,7 @@ const deleteAd = async (req, res) => {
     return res.status(200).json({
       success: true,
       message: "Ad deleted successfully",
-      data: ad,
+      data: serializeAd(ad),
     });
   } catch (error) {
     console.error("Error deleting ad:", error);
@@ -199,6 +232,7 @@ const deleteAd = async (req, res) => {
 
 module.exports = {
   getAds,
+  getActiveAds,
   createAd,
   updateAd,
   deleteAd,
