@@ -36,7 +36,12 @@ adminRouter.patch("/products/:id/most-buy", isAdminAuth, updateMostBuyStatus);
 adminRouter.get("/notifications/recipients", isAdminAuth, getNotificationRecipients);
 adminRouter.post("/notifications/send", isAdminAuth, sendManualNotification);
 adminRouter.get("/settings", isAdminAuth, getSettings);
-adminRouter.put("/settings", isAdminAuth, updateSettings);
+adminRouter.put(
+  "/settings",
+  isAdminAuth,
+  upload.single("authorizedSignatory"),
+  updateSettings,
+);
 adminRouter.get("/ads", isAdminAuth, getAds);
 adminRouter.post("/ads", isAdminAuth, upload.single("image"), createAd);
 adminRouter.put("/ads/:id", isAdminAuth, upload.single("image"), updateAd);

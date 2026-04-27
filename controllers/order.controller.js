@@ -2,9 +2,11 @@
 const fs = require("fs");
 const path = require("path");
 const PDFDocument = require("pdfkit");
+const axios = require("axios");
 const Order = require("../models/order.model");
 const ShippingInfo = require("../models/shippingInfo.model");
-const Setting = require("../models/settings.model");
+const Product = require("../models/products.model");
+const AdminInfo = require("../models/adminInfo.model");
 const User = require("../models/users.model");
 const {
   MAIL_FROM,
@@ -27,9 +29,13 @@ const INVOICE_LOGO_PATH = path.join(
 );
 const DEFAULT_STORE_DETAILS = {
   storeName: "Nohar Cosmetics",
-  supportEmail: "noharcosmetics@gmail.com",
-  supportPhone: "7057319253",
+  ownerName: "Nohar Owner",
+  email: "noharcosmetics@gmail.com",
   address: "Dwarka Circle, Kathe Lane, Nashik, Maharashtra, India",
+  authorizedSignatory: "Nohar Cosmetics",
+  allowCOD: true,
+  freeShippingAbove: 0,
+  maintenanceMode: false,
 };
 
 const normalizeNumber = (value) => {
@@ -223,17 +229,75 @@ const getOrderItemsHtml = (order) =>
     .join("");
 
 const getStoreDetails = async () => {
-  const settings = await Setting.findOne().lean();
+  const settings = await AdminInfo.findOne().lean();
 
   return {
-    storeName:
-      settings?.storeName?.trim() || DEFAULT_STORE_DETAILS.storeName,
-    supportEmail:
-      settings?.supportEmail?.trim() || DEFAULT_STORE_DETAILS.supportEmail,
-    supportPhone:
-      settings?.supportPhone?.trim() || DEFAULT_STORE_DETAILS.supportPhone,
+    storeName: DEFAULT_STORE_DETAILS.storeName,
+    ownerName:
+      settings?.ownerName?.trim() || DEFAULT_STORE_DETAILS.ownerName,
+    email: settings?.email?.trim() || DEFAULT_STORE_DETAILS.email,
     address: settings?.address?.trim() || DEFAULT_STORE_DETAILS.address,
+    authorizedSignatory:
+      settings?.authorizedSignatory || DEFAULT_STORE_DETAILS.authorizedSignatory,
+    allowCOD:
+      settings?.allowCOD !== undefined
+        ? Boolean(settings.allowCOD)
+        : DEFAULT_STORE_DETAILS.allowCOD,
+    freeShippingAbove:
+      Number(settings?.freeShippingAbove) || DEFAULT_STORE_DETAILS.freeShippingAbove,
+    maintenanceMode:
+      settings?.maintenanceMode !== undefined
+        ? Boolean(settings.maintenanceMode)
+        : DEFAULT_STORE_DETAILS.maintenanceMode,
   };
+};
+
+const getRemoteImageBuffer = async (url) => {
+  if (!url) return null;
+
+  try {
+    const response = await axios.get(url, {
+      responseType: "arraybuffer",
+      timeout: 20000,
+    });
+
+    return Buffer.from(response.data);
+  } catch (error) {
+    return null;
+  }
+};
+
+const getInvoiceItemsWithGst = async (items = []) => {
+  const normalizedItems = Array.isArray(items) ? items : [];
+  const productIds = [
+    ...new Set(
+      normalizedItems
+        .map((item) => String(item?.product || ""))
+        .filter(Boolean),
+    ),
+  ];
+
+  if (!productIds.length) {
+    return normalizedItems.map((item) => ({
+      ...item,
+      gstRate: Number(item?.gstRate || 0),
+    }));
+  }
+
+  const products = await Product.find({ _id: { $in: productIds } })
+    .select("_id gstRate")
+    .lean();
+  const gstByProductId = new Map(
+    products.map((product) => [String(product._id), Number(product.gstRate || 0)]),
+  );
+
+  return normalizedItems.map((item) => ({
+    ...item,
+    gstRate:
+      item?.gstRate !== undefined && item?.gstRate !== null
+        ? Number(item.gstRate || 0)
+        : Number(gstByProductId.get(String(item?.product || "")) || 0),
+  }));
 };
 
 const getCustomerDisplayName = (customer, order) =>
@@ -298,10 +362,11 @@ const drawInvoiceTable = ({
 }) => {
   const columns = [
     { label: "Sl.", width: 32, align: "left" },
-    { label: "Description", width: 220, align: "left" },
-    { label: "Qty", width: 42, align: "center" },
-    { label: "Rate", width: 86, align: "right" },
-    { label: "Amount", width: 100, align: "right" },
+    { label: "Description", width: 205, align: "left" },
+    { label: "Qty", width: 40, align: "center" },
+    { label: "GST %", width: 60, align: "center" },
+    { label: "Rate", width: 80, align: "right" },
+    { label: "Amount", width: 106, align: "right" },
   ];
   const rowHeight = 28;
 
@@ -329,6 +394,7 @@ const drawInvoiceTable = ({
     const quantity = normalizeCurrencyValue(item?.quantity || 0);
     const price = normalizeCurrencyValue(item?.price || 0);
     const amount = quantity * price;
+    const gstRate = normalizeCurrencyValue(item?.gstRate || 0);
 
     doc
       .rect(startX, cursorY, contentWidth, rowHeight)
@@ -339,6 +405,7 @@ const drawInvoiceTable = ({
       String(index + 1),
       item?.name || "Product",
       String(quantity),
+      `${gstRate}%`,
       formatCurrency(price),
       formatCurrency(amount),
     ];
@@ -365,6 +432,7 @@ const drawInvoiceTable = ({
 
 const buildInvoicePdf = async ({ order, customer, res }) => {
   const storeDetails = await getStoreDetails();
+  const invoiceItems = await getInvoiceItemsWithGst(order?.orderItems || []);
   const invoiceNumber = getInvoiceNumber(order);
   const orderNumber = getOrderNumber(order);
   const customerName = getCustomerDisplayName(customer, order);
@@ -379,7 +447,7 @@ const buildInvoicePdf = async ({ order, customer, res }) => {
     }),
     customerEmail ? `Email: ${customerEmail}` : "",
   ].filter(Boolean);
-  const itemTotal = (order?.orderItems || []).reduce(
+  const itemTotal = invoiceItems.reduce(
     (sum, item) =>
       sum +
       normalizeCurrencyValue(item?.price) *
@@ -492,9 +560,9 @@ const buildInvoicePdf = async ({ order, customer, res }) => {
     doc,
     lines: [
       storeDetails.storeName,
+      `Owner: ${storeDetails.ownerName}`,
       storeDetails.address,
-      `Phone: ${storeDetails.supportPhone}`,
-      `Email: ${storeDetails.supportEmail}`,
+      `Email: ${storeDetails.email}`,
     ],
     x: leftX + 16,
     y: sectionTop + 34,
@@ -526,7 +594,7 @@ const buildInvoicePdf = async ({ order, customer, res }) => {
 
   cursorY = drawInvoiceTable({
     doc,
-    items: order?.orderItems || [],
+    items: invoiceItems,
     startX: leftX,
     startY: cursorY + 14,
     contentWidth: pageWidth,
@@ -535,8 +603,16 @@ const buildInvoicePdf = async ({ order, customer, res }) => {
   const totalsTop = cursorY + 18;
   const totalsBoxWidth = 230;
   const totalsX = leftX + pageWidth - totalsBoxWidth;
+  const gstSummary = [
+    ...new Set(invoiceItems.map((item) => Number(item?.gstRate || 0))),
+  ]
+    .sort((a, b) => a - b)
+    .map((value) => `${value}%`)
+    .join(", ");
+
   const totals = [
     ["Items Total", formatCurrency(itemTotal)],
+    ["GST Rates", gstSummary || "0%"],
     ["Shipping", shippingCharge > 0 ? formatCurrency(shippingCharge) : "Free"],
     ["Amount Paid", formatCurrency(order?.amountPaid || 0)],
     ["Amount Due", formatCurrency(order?.amountDue || 0)],
@@ -544,7 +620,7 @@ const buildInvoicePdf = async ({ order, customer, res }) => {
   ];
 
   doc
-    .roundedRect(totalsX, totalsTop, totalsBoxWidth, 118, 14)
+    .roundedRect(totalsX, totalsTop, totalsBoxWidth, 136, 14)
     .fillAndStroke("#f8f3ee", "#eadfd8");
 
   totals.forEach(([label, value], index) => {
@@ -569,7 +645,7 @@ const buildInvoicePdf = async ({ order, customer, res }) => {
       });
   });
 
-  const notesTop = totalsTop + 138;
+  const notesTop = totalsTop + 156;
 
   doc
     .font("Helvetica-Bold")
@@ -590,14 +666,26 @@ const buildInvoicePdf = async ({ order, customer, res }) => {
     size: 10,
   });
 
-  doc
-    .font("Helvetica-Bold")
-    .fontSize(11)
-    .fillColor("#4c4039")
-    .text(storeDetails.storeName, totalsX, notesTop + 4, {
-      width: totalsBoxWidth,
+  const authorizedSignatoryBuffer = await getRemoteImageBuffer(
+    storeDetails.authorizedSignatory?.url,
+  );
+
+  if (authorizedSignatoryBuffer) {
+    doc.image(authorizedSignatoryBuffer, totalsX + 64, notesTop - 6, {
+      fit: [150, 44],
       align: "right",
+      valign: "center",
     });
+  } else {
+    doc
+      .font("Helvetica-Bold")
+      .fontSize(11)
+      .fillColor("#4c4039")
+      .text(storeDetails.storeName, totalsX, notesTop + 4, {
+        width: totalsBoxWidth,
+        align: "right",
+      });
+  }
 
   doc
     .font("Helvetica")
@@ -867,6 +955,7 @@ const createOrder = async (req, res) => {
 
     const normalizedPaymentMode = String(paymentMode || "").trim().toUpperCase();
     const normalizedCustomerEmail = String(customerEmail || "").trim().toLowerCase();
+    const storeDetails = await getStoreDetails();
 
     if (!userId || !shippingId || !orderItems || !totalPrice || !normalizedPaymentMode) {
       return res
@@ -878,6 +967,24 @@ const createOrder = async (req, res) => {
       return res
         .status(400)
         .json({ success: false, message: "Order items are required" });
+    }
+
+    if (storeDetails.maintenanceMode) {
+      return res.status(503).json({
+        success: false,
+        message: "Orders are temporarily unavailable because maintenance mode is enabled",
+      });
+    }
+
+    if (
+      !storeDetails.allowCOD &&
+      (normalizedPaymentMode === "COD" ||
+        normalizedPaymentMode === "PARTIAL_COD")
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "Cash on delivery is currently disabled",
+      });
     }
 
     const normalizedTotal = normalizeNumber(totalPrice);
@@ -974,10 +1081,39 @@ const createOrder = async (req, res) => {
         .json({ success: false, message: "Invalid paid amount" });
     }
 
+    const productIds = [
+      ...new Set(
+        orderItems
+          .map((item) => String(item?.product || item?.productId || "").trim())
+          .filter(Boolean),
+      ),
+    ];
+    const orderedProducts = await Product.find({ _id: { $in: productIds } })
+      .select("_id gstRate")
+      .lean();
+    const productGstById = new Map(
+      orderedProducts.map((product) => [
+        String(product._id),
+        Number(product.gstRate || 0),
+      ]),
+    );
+    const normalizedOrderItems = orderItems.map((item) => {
+      const productId = String(item?.product || item?.productId || "").trim();
+
+      return {
+        ...item,
+        product: productId,
+        gstRate:
+          item?.gstRate !== undefined && item?.gstRate !== null
+            ? Number(item.gstRate || 0)
+            : Number(productGstById.get(productId) || 0),
+      };
+    });
+
     const order = new Order({
       user: userId,
       shippingInfo: selectedAddress,
-      orderItems,
+      orderItems: normalizedOrderItems,
       totalPrice: normalizedTotal,
       orderStatus: "ORDER_PLACED",
       payment: normalizedPaymentId,
