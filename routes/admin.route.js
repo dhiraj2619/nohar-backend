@@ -15,6 +15,7 @@ const {
 } = require("../controllers/settings.controller");
 const {
   advanceOrderPhase,
+  getAdminOrderDetails,
   getOrders,
   updateOrderStatus,
 } = require("../controllers/order.controller");
@@ -28,6 +29,7 @@ adminRouter.post("/login", loginAdmin);
 adminRouter.get("/owner", getOwnerAdmin);
 adminRouter.get("/customers", isAdminAuth, getCustomers);
 adminRouter.get("/orders", isAdminAuth, getOrders);
+adminRouter.get("/orders/:orderId", isAdminAuth, getAdminOrderDetails);
 adminRouter.patch("/orders/:orderId/next-phase", isAdminAuth, advanceOrderPhase);
 adminRouter.patch("/orders/:orderId/status", isAdminAuth, updateOrderStatus);
 adminRouter.patch("/products/:id/most-buy", isAdminAuth, updateMostBuyStatus);

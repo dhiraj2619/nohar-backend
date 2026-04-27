@@ -1195,7 +1195,9 @@ const cancelOrder = async (req, res) => {
 
 const getOrders = async (req, res) => {
   try {
-    const orders = await Order.find().sort({ createdAt: -1 });
+    const orders = await Order.find()
+      .populate("user", "_id fullName email phone")
+      .sort({ createdAt: -1 });
 
     res.status(200).json({
       success: true,
@@ -1203,6 +1205,31 @@ const getOrders = async (req, res) => {
     });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+const getAdminOrderDetails = async (req, res) => {
+  try {
+    const { orderId } = req.params;
+
+    const order = await Order.findById(orderId).populate(
+      "user",
+      "_id fullName email phone",
+    );
+
+    if (!order) {
+      return res.status(404).json({
+        success: false,
+        message: "Order not found",
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      order,
+    });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: error.message });
   }
 };
 
@@ -1275,7 +1302,7 @@ const downloadOrderInvoice = async (req, res) => {
 const updateOrderStatus = async (req, res) => {
   try {
     const { orderId } = req.params;
-    const { status } = req.body;
+    const { status, cancellationReason } = req.body;
 
     const normalizedStatus = normalizeOrderStatus(status);
     const validStatuses = [...ORDER_PHASES, "CANCELLED"];
@@ -1294,14 +1321,37 @@ const updateOrderStatus = async (req, res) => {
         .json({ success: false, message: "Order not found" });
     }
 
-    applyOrderStatusSideEffects(order, normalizedStatus);
+    if (normalizedStatus === "CANCELLED") {
+      const normalizedReason = String(cancellationReason || "").trim();
+
+      if (!normalizedReason) {
+        return res.status(400).json({
+          success: false,
+          message: "Cancellation reason is required",
+        });
+      }
+
+      order.orderStatus = "CANCELLED";
+      order.cancellationReason = normalizedReason;
+      order.cancelledAt = new Date();
+      order.cancelledBy = "ADMIN";
+    } else {
+      order.cancellationReason = null;
+      order.cancelledAt = null;
+      order.cancelledBy = null;
+      applyOrderStatusSideEffects(order, normalizedStatus);
+    }
 
     await order.save();
     await notifyOrderUser(order.user, order, normalizedStatus);
+    const populatedOrder = await Order.findById(order._id).populate(
+      "user",
+      "_id fullName email phone",
+    );
 
     res
       .status(200)
-      .json({ success: true, message: "Order status updated", order });
+      .json({ success: true, message: "Order status updated", order: populatedOrder });
   } catch (error) {
     res.status(500).json({
       success: false,
@@ -1372,6 +1422,7 @@ module.exports = {
   createOrder,
   cancelOrder,
   getOrders,
+  getAdminOrderDetails,
   getUserOrders,
   downloadOrderInvoice,
   updateOrderStatus,
