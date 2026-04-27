@@ -16,11 +16,13 @@ const { categoryRouter } = require("./routes/category.route");
 const { collectionRouter } = require("./routes/collection.route");
 const { productRouter } = require("./routes/products.route");
 const { adminRouter } = require("./routes/admin.route");
+const { adRouter } = require("./routes/ad.route");
 const { offerRouter } = require("./routes/offer.route");
 const { userRouter } = require("./routes/user.route");
 const { shippingRouter } = require("./routes/shipping.route");
 const { paymentRouter } = require("./routes/payment.route");
 const orderRouter = require("./routes/order.route");
+const { notificationRouter } = require("./routes/notification.route");
 const { initializeFirebase } = require("./services/notification.service");
 
 const app = express();
@@ -48,6 +50,7 @@ app.use("/api/v1/categories", categoryRouter);
 app.use("/api/v1/collections", collectionRouter);
 app.use("/api/v1/products", productRouter);
 app.use("/api/v1/offers", offerRouter);
+app.use("/api/v1/ads", adRouter);
 app.use("/api/v1/users", userRouter);
 app.use("/api/v1/shipping", shippingRouter);
 app.use("/api/v1/payment", paymentRouter);
@@ -55,6 +58,7 @@ app.use("/api/v1/orders", orderRouter);
 
 // admin routes
 app.use("/api/v1/admin", adminRouter);
+app.use("/api/v1/admin/notifications", notificationRouter);
 
 app.listen(port, () => {
   console.log(`server is running on http://localhost:${port}`);

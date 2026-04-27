@@ -2,8 +2,6 @@ const {
   getOwnerAdmin,
   getCustomers,
   loginAdmin,
-  sendManualNotification,
-  getNotificationRecipients,
 } = require("../controllers/admin.controller");
 const {
   createAd,
@@ -33,8 +31,6 @@ adminRouter.get("/orders", isAdminAuth, getOrders);
 adminRouter.patch("/orders/:orderId/next-phase", isAdminAuth, advanceOrderPhase);
 adminRouter.patch("/orders/:orderId/status", isAdminAuth, updateOrderStatus);
 adminRouter.patch("/products/:id/most-buy", isAdminAuth, updateMostBuyStatus);
-adminRouter.get("/notifications/recipients", isAdminAuth, getNotificationRecipients);
-adminRouter.post("/notifications/send", isAdminAuth, sendManualNotification);
 adminRouter.get("/settings", isAdminAuth, getSettings);
 adminRouter.put(
   "/settings",
