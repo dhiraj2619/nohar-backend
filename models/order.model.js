@@ -28,6 +28,11 @@ const orderItemSchema = new mongoose.Schema(
       default: 0,
       min: 0,
     },
+    hsnCode: {
+      type: String,
+      default: "",
+      trim: true,
+    },
   },
   { _id: false },
 );

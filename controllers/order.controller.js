@@ -140,6 +140,8 @@ const normalizeCurrencyValue = (amount) => {
   return Number.isNaN(numericAmount) ? 0 : numericAmount;
 };
 
+const hasNumberValue = (value) => value !== undefined && value !== null && value !== "";
+
 const normalizePartialPaymentType = (value, fallback = "PERCENT") => {
   const normalizedValue = String(value || "")
     .trim()
@@ -267,10 +269,13 @@ const getStoreDetails = async () => {
       DEFAULT_STORE_DETAILS.partialPaymentType,
     ),
     partialPaymentValue:
-      Number(settings?.partialPaymentValue) ||
-      DEFAULT_STORE_DETAILS.partialPaymentValue,
+      hasNumberValue(settings?.partialPaymentValue)
+        ? Number(settings.partialPaymentValue)
+        : DEFAULT_STORE_DETAILS.partialPaymentValue,
     freeShippingAbove:
-      Number(settings?.freeShippingAbove) || DEFAULT_STORE_DETAILS.freeShippingAbove,
+      hasNumberValue(settings?.freeShippingAbove)
+        ? Number(settings.freeShippingAbove)
+        : DEFAULT_STORE_DETAILS.freeShippingAbove,
     maintenanceMode:
       settings?.maintenanceMode !== undefined
         ? Boolean(settings.maintenanceMode)
@@ -311,10 +316,10 @@ const getInvoiceItemsWithGst = async (items = []) => {
   }
 
   const products = await Product.find({ _id: { $in: productIds } })
-    .select("_id gstRate")
+    .select("_id gstRate hsnCode")
     .lean();
-  const gstByProductId = new Map(
-    products.map((product) => [String(product._id), Number(product.gstRate || 0)]),
+  const productById = new Map(
+    products.map((product) => [String(product._id), product]),
   );
 
   return normalizedItems.map((item) => ({
@@ -322,7 +327,13 @@ const getInvoiceItemsWithGst = async (items = []) => {
     gstRate:
       item?.gstRate !== undefined && item?.gstRate !== null
         ? Number(item.gstRate || 0)
-        : Number(gstByProductId.get(String(item?.product || "")) || 0),
+        : Number(productById.get(String(item?.product || ""))?.gstRate || 0),
+    hsnCode:
+      typeof item?.hsnCode === "string" && item.hsnCode.trim()
+        ? item.hsnCode.trim()
+        : String(
+            productById.get(String(item?.product || ""))?.hsnCode || "",
+          ).trim(),
   }));
 };
 
@@ -429,7 +440,9 @@ const drawInvoiceTable = ({
     let rowX = startX;
     const values = [
       String(index + 1),
-      item?.name || "Product",
+      item?.hsnCode
+        ? `${item?.name || "Product"}\nHSN: ${item.hsnCode}`
+        : item?.name || "Product",
       String(quantity),
       `${gstRate}%`,
       formatCurrency(price),
@@ -480,6 +493,12 @@ const buildInvoicePdf = async ({ order, customer, res }) => {
         normalizeCurrencyValue(item?.quantity),
     0,
   );
+  const totalGstAmount = invoiceItems.reduce((sum, item) => {
+    const quantity = normalizeCurrencyValue(item?.quantity || 0);
+    const price = normalizeCurrencyValue(item?.price || 0);
+    const gstRate = normalizeCurrencyValue(item?.gstRate || 0);
+    return sum + (quantity * price * gstRate) / 100;
+  }, 0);
   const totalAmount = normalizeCurrencyValue(order?.totalPrice || itemTotal);
   const shippingCharge = Number((totalAmount - itemTotal).toFixed(2));
   const paymentLabel =
@@ -639,6 +658,7 @@ const buildInvoicePdf = async ({ order, customer, res }) => {
   const totals = [
     ["Items Total", formatCurrency(itemTotal)],
     ["GST Rates", gstSummary || "0%"],
+    ["Estimated GST", formatCurrency(totalGstAmount)],
     ["Shipping", shippingCharge > 0 ? formatCurrency(shippingCharge) : "Free"],
     ["Amount Paid", formatCurrency(order?.amountPaid || 0)],
     ["Amount Due", formatCurrency(order?.amountDue || 0)],
@@ -646,7 +666,7 @@ const buildInvoicePdf = async ({ order, customer, res }) => {
   ];
 
   doc
-    .roundedRect(totalsX, totalsTop, totalsBoxWidth, 136, 14)
+    .roundedRect(totalsX, totalsTop, totalsBoxWidth, 154, 14)
     .fillAndStroke("#f8f3ee", "#eadfd8");
 
   totals.forEach(([label, value], index) => {
@@ -671,7 +691,7 @@ const buildInvoicePdf = async ({ order, customer, res }) => {
       });
   });
 
-  const notesTop = totalsTop + 156;
+  const notesTop = totalsTop + 174;
 
   doc
     .font("Helvetica-Bold")
@@ -1155,16 +1175,14 @@ const createOrder = async (req, res) => {
       ),
     ];
     const orderedProducts = await Product.find({ _id: { $in: productIds } })
-      .select("_id gstRate")
+      .select("_id gstRate hsnCode")
       .lean();
-    const productGstById = new Map(
-      orderedProducts.map((product) => [
-        String(product._id),
-        Number(product.gstRate || 0),
-      ]),
+    const productById = new Map(
+      orderedProducts.map((product) => [String(product._id), product]),
     );
     const normalizedOrderItems = orderItems.map((item) => {
       const productId = String(item?.product || item?.productId || "").trim();
+      const productMeta = productById.get(productId) || {};
 
       return {
         ...item,
@@ -1172,7 +1190,11 @@ const createOrder = async (req, res) => {
         gstRate:
           item?.gstRate !== undefined && item?.gstRate !== null
             ? Number(item.gstRate || 0)
-            : Number(productGstById.get(productId) || 0),
+            : Number(productMeta.gstRate || 0),
+        hsnCode:
+          typeof item?.hsnCode === "string" && item.hsnCode.trim()
+            ? item.hsnCode.trim()
+            : String(productMeta.hsnCode || "").trim(),
       };
     });
 

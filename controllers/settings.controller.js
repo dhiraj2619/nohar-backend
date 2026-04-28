@@ -30,6 +30,29 @@ const getOrCreateSettings = async () => {
   return settings;
 };
 
+const buildPublicSettingsPayload = (settings) => ({
+  allowCOD:
+    settings?.allowCOD !== undefined ? Boolean(settings.allowCOD) : true,
+  allowPartial:
+    settings?.allowPartial !== undefined ? Boolean(settings.allowPartial) : false,
+  partialPaymentType:
+    normalizePartialPaymentType(settings?.partialPaymentType, "PERCENT"),
+  partialPaymentValue:
+    settings?.partialPaymentValue !== undefined &&
+    settings?.partialPaymentValue !== null
+      ? Number(settings.partialPaymentValue)
+      : 0,
+  freeShippingAbove:
+    settings?.freeShippingAbove !== undefined &&
+    settings?.freeShippingAbove !== null
+      ? Number(settings.freeShippingAbove)
+      : 0,
+  maintenanceMode:
+    settings?.maintenanceMode !== undefined
+      ? Boolean(settings.maintenanceMode)
+      : false,
+});
+
 const uploadAuthorizedSignatoryImage = async (file) => {
   if (!file?.path) return null;
 
@@ -56,6 +79,24 @@ const getSettings = async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "An error occurred while fetching settings",
+      error: error.message,
+    });
+  }
+};
+
+const getPublicSettings = async (req, res) => {
+  try {
+    const settings = await getOrCreateSettings();
+
+    return res.status(200).json({
+      success: true,
+      data: buildPublicSettingsPayload(settings),
+    });
+  } catch (error) {
+    console.error("Error fetching public settings:", error);
+    return res.status(500).json({
+      success: false,
+      message: "An error occurred while fetching public settings",
       error: error.message,
     });
   }
@@ -155,5 +196,6 @@ const updateSettings = async (req, res) => {
 
 module.exports = {
   getSettings,
+  getPublicSettings,
   updateSettings,
 };
