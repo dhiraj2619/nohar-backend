@@ -34,6 +34,9 @@ const DEFAULT_STORE_DETAILS = {
   address: "Dwarka Circle, Kathe Lane, Nashik, Maharashtra, India",
   authorizedSignatory: "Nohar Cosmetics",
   allowCOD: true,
+  allowPartial: false,
+  partialPaymentType: "PERCENT",
+  partialPaymentValue: 0,
   freeShippingAbove: 0,
   maintenanceMode: false,
 };
@@ -135,6 +138,18 @@ const formatCurrency = (amount) => {
 const normalizeCurrencyValue = (amount) => {
   const numericAmount = Number(amount || 0);
   return Number.isNaN(numericAmount) ? 0 : numericAmount;
+};
+
+const normalizePartialPaymentType = (value, fallback = "PERCENT") => {
+  const normalizedValue = String(value || "")
+    .trim()
+    .toUpperCase();
+
+  if (normalizedValue === "PERCENT" || normalizedValue === "FLAT") {
+    return normalizedValue;
+  }
+
+  return fallback;
 };
 
 const escapeHtml = (value) =>
@@ -243,6 +258,17 @@ const getStoreDetails = async () => {
       settings?.allowCOD !== undefined
         ? Boolean(settings.allowCOD)
         : DEFAULT_STORE_DETAILS.allowCOD,
+    allowPartial:
+      settings?.allowPartial !== undefined
+        ? Boolean(settings.allowPartial)
+        : DEFAULT_STORE_DETAILS.allowPartial,
+    partialPaymentType: normalizePartialPaymentType(
+      settings?.partialPaymentType,
+      DEFAULT_STORE_DETAILS.partialPaymentType,
+    ),
+    partialPaymentValue:
+      Number(settings?.partialPaymentValue) ||
+      DEFAULT_STORE_DETAILS.partialPaymentValue,
     freeShippingAbove:
       Number(settings?.freeShippingAbove) || DEFAULT_STORE_DETAILS.freeShippingAbove,
     maintenanceMode:
@@ -1004,6 +1030,13 @@ const createOrder = async (req, res) => {
         .json({ success: false, message: "Payment ID is required" });
     }
 
+    if (normalizedPaymentMode === "PARTIAL_COD" && !storeDetails.allowPartial) {
+      return res.status(400).json({
+        success: false,
+        message: "Partial payment is currently disabled",
+      });
+    }
+
     const customer = await User.findById(userId).select("_id fullName email phone fcmToken");
 
     if (!customer) {
@@ -1044,19 +1077,52 @@ const createOrder = async (req, res) => {
       paymentStatus = "PAID";
       remainingPaymentMethod = undefined;
     } else if (normalizedPaymentMode === "PARTIAL_COD") {
-      const percentValue = normalizeNumber(partialPercent ?? 20);
+      const configuredPartialType = normalizePartialPaymentType(
+        storeDetails.partialPaymentType,
+        "PERCENT",
+      );
+      const configuredPartialValue = normalizeNumber(
+        storeDetails.partialPaymentValue,
+      );
 
-      if (!percentValue || percentValue <= 0 || percentValue >= 100) {
-        return res.status(400).json({
-          success: false,
-          message: "Partial percent must be between 1 and 99",
-        });
+      if (configuredPartialType === "FLAT") {
+        if (
+          configuredPartialValue === null ||
+          configuredPartialValue <= 0 ||
+          configuredPartialValue >= normalizedTotal
+        ) {
+          return res.status(400).json({
+            success: false,
+            message:
+              "Partial flat amount must be greater than 0 and less than total price",
+          });
+        }
+
+        normalizedAmountPaid = Number(configuredPartialValue.toFixed(2));
+        normalizedPercent = Number(
+          ((normalizedAmountPaid / normalizedTotal) * 100).toFixed(2),
+        );
+      } else {
+        const percentValue =
+          configuredPartialValue ?? normalizeNumber(partialPercent ?? 20);
+
+        if (!percentValue || percentValue <= 0 || percentValue >= 100) {
+          return res.status(400).json({
+            success: false,
+            message: "Partial percent must be between 1 and 99",
+          });
+        }
+
+        normalizedPercent = percentValue;
+        normalizedAmountPaid = Number(
+          ((normalizedTotal * percentValue) / 100).toFixed(2),
+        );
       }
 
-      normalizedPercent = percentValue;
-      normalizedAmountPaid =
-        normalizeNumber(amountPaid) ??
-        Number((normalizedTotal * percentValue) / 100);
+      if (amountPaid !== undefined && normalizeNumber(amountPaid) !== null) {
+        normalizedAmountPaid = Number(normalizedAmountPaid.toFixed(2));
+      }
+
       normalizedAmountDue = Number(
         (normalizedTotal - normalizedAmountPaid).toFixed(2),
       );

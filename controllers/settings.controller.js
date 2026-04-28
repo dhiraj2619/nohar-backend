@@ -8,6 +8,18 @@ const toBoolean = (value, fallback = false) => {
   return Boolean(value);
 };
 
+const normalizePartialPaymentType = (value, fallback = "PERCENT") => {
+  const normalizedValue = String(value || "")
+    .trim()
+    .toUpperCase();
+
+  if (normalizedValue === "PERCENT" || normalizedValue === "FLAT") {
+    return normalizedValue;
+  }
+
+  return fallback;
+};
+
 const getOrCreateSettings = async () => {
   let settings = await AdminInfo.findOne();
 
@@ -59,6 +71,9 @@ const updateSettings = async (req, res) => {
       maintenanceMode,
       allowCOD,
       allowCod,
+      allowPartial,
+      partialPaymentType,
+      partialPaymentValue,
       freeShippingAbove,
       removeAuthorizedSignatory,
     } = req.body;
@@ -78,6 +93,21 @@ const updateSettings = async (req, res) => {
         allowCOD !== undefined ? allowCOD : allowCod,
         true,
       );
+    }
+    if (allowPartial !== undefined) {
+      settings.allowPartial = toBoolean(allowPartial, false);
+    }
+    if (partialPaymentType !== undefined) {
+      settings.partialPaymentType = normalizePartialPaymentType(
+        partialPaymentType,
+        settings.partialPaymentType || "PERCENT",
+      );
+    }
+    if (partialPaymentValue !== undefined) {
+      const normalizedPartialPaymentValue = Number(partialPaymentValue);
+      settings.partialPaymentValue = Number.isNaN(normalizedPartialPaymentValue)
+        ? settings.partialPaymentValue
+        : normalizedPartialPaymentValue;
     }
     if (freeShippingAbove !== undefined) {
       const normalizedFreeShippingAbove = Number(freeShippingAbove);

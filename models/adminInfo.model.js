@@ -40,6 +40,20 @@ const adminInfoSchema = new mongoose.Schema(
       type: Boolean,
       default: true,
     },
+    allowPartial: {
+      type: Boolean,
+      default: false,
+    },
+    partialPaymentType: {
+      type: String,
+      enum: ["PERCENT", "FLAT"],
+      default: "PERCENT",
+    },
+    partialPaymentValue: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
     freeShippingAbove: {
       type: Number,
       default: 0,
