@@ -399,12 +399,12 @@ const drawInvoiceTable = ({
 }) => {
   const columns = [
     { label: "Sl.", width: 32, align: "left" },
-    { label: "Product Title", width: 285, align: "left" },
-    { label: "Qty", width: 42, align: "center" },
-    { label: "GST %", width: 62, align: "center" },
-    { label: "Amount", width: 134, align: "right" },
+    { label: "Product Title", width: 255, align: "left" },
+    { label: "Qty", width: 40, align: "center" },
+    { label: "GST %", width: 60, align: "center" },
+    { label: "Amount", width: 136, align: "right" },
   ];
-  const rowHeight = 28;
+  const rowHeight = 36;
 
   doc
     .roundedRect(startX, startY, contentWidth, rowHeight, 8)
@@ -417,7 +417,7 @@ const drawInvoiceTable = ({
       .font("Helvetica-Bold")
       .fontSize(10)
       .fillColor("#5a4a42")
-      .text(column.label, cursorX + 8, startY + 9, {
+      .text(column.label, cursorX + 8, startY + 11, {
         width: column.width - 16,
         align: column.align,
       });
@@ -453,7 +453,7 @@ const drawInvoiceTable = ({
         .font("Helvetica")
         .fontSize(10)
         .fillColor("#2f2a27")
-        .text(value, rowX + 8, cursorY + 9, {
+        .text(value, rowX + 8, cursorY + 8, {
           width: column.width - 16,
           align: column.align,
           ellipsis: true,
