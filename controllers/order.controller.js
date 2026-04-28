@@ -399,11 +399,10 @@ const drawInvoiceTable = ({
 }) => {
   const columns = [
     { label: "Sl.", width: 32, align: "left" },
-    { label: "Description", width: 205, align: "left" },
-    { label: "Qty", width: 40, align: "center" },
-    { label: "GST %", width: 60, align: "center" },
-    { label: "Rate", width: 80, align: "right" },
-    { label: "Amount", width: 106, align: "right" },
+    { label: "Product Title", width: 285, align: "left" },
+    { label: "Qty", width: 42, align: "center" },
+    { label: "GST %", width: 62, align: "center" },
+    { label: "Amount", width: 134, align: "right" },
   ];
   const rowHeight = 28;
 
@@ -445,7 +444,6 @@ const drawInvoiceTable = ({
         : item?.name || "Product",
       String(quantity),
       `${gstRate}%`,
-      formatCurrency(price),
       formatCurrency(amount),
     ];
 
