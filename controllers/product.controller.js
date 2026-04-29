@@ -152,6 +152,7 @@ const createProduct = async (req, res) => {
       ratings,
       emiAvailable,
       emiStartsAt,
+      insideStock,
       isMostBuy,
     } = req.body;
 
@@ -275,6 +276,8 @@ const createProduct = async (req, res) => {
       ratings: toNumber(ratings, 0),
       emiAvailable: toBoolean(emiAvailable),
       emiStartsAt: toNumber(emiStartsAt, 0),
+      insideStock:
+        insideStock !== undefined ? toBoolean(insideStock) : true,
       isMostBuy: toBoolean(isMostBuy),
     });
 
@@ -328,6 +331,7 @@ const updateProduct = async (req, res) => {
       ratings,
       emiAvailable,
       emiStartsAt,
+      insideStock,
       imageIndexes,
       isMostBuy,
     } = req.body;
@@ -532,6 +536,8 @@ const updateProduct = async (req, res) => {
       product.emiAvailable = toBoolean(emiAvailable);
     if (emiStartsAt !== undefined)
       product.emiStartsAt = toNumber(emiStartsAt, product.emiStartsAt);
+    if (insideStock !== undefined)
+      product.insideStock = toBoolean(insideStock);
     if (isMostBuy !== undefined) product.isMostBuy = toBoolean(isMostBuy);
 
     applyProductDefaults(product);

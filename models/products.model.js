@@ -132,6 +132,10 @@ const productSchema = new mongoose.Schema(
       default: 0,
       min: 0,
     },
+    insideStock: {
+      type: Boolean,
+      default: true,
+    },
     isMostBuy: {
       type: Boolean,
       default: false,

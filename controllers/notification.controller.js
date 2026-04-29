@@ -72,6 +72,45 @@ const getNotifications = async (req, res) => {
   }
 };
 
+const deleteNotification = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid notification id",
+      });
+    }
+
+    const notification = await Notification.findByIdAndDelete(id);
+
+    if (!notification) {
+      return res.status(404).json({
+        success: false,
+        message: "Notification not found",
+      });
+    }
+
+    if (notification.image?.public_id) {
+      await Cloudinary.v2.uploader.destroy(notification.image.public_id);
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "Notification deleted successfully",
+      data: notification,
+    });
+  } catch (error) {
+    console.error("Error deleting notification:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to delete notification",
+      error: error.message,
+    });
+  }
+};
+
 const createNotification = async (req, res) => {
   try {
     const { title, audienceType = "all", recipientIds } = req.body;
@@ -189,4 +228,5 @@ const createNotification = async (req, res) => {
 module.exports = {
   getNotifications,
   createNotification,
+  deleteNotification,
 };
