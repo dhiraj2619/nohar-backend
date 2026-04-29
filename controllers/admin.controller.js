@@ -113,11 +113,17 @@ const normalizeStringArray = (value) =>
 const normalizeObjectIdArray = (value) =>
   normalizeStringArray(value).filter((id) => mongoose.Types.ObjectId.isValid(id));
 
+const pushTokenQuery = {
+  $exists: true,
+  $type: "string",
+  $regex: /\S/,
+};
+
 const buildManualNotificationQuery = ({ audience, userIds, phoneNumbers }) => {
   const normalizedAudience = String(audience || "all").trim().toLowerCase();
 
   if (normalizedAudience === "all") {
-    return { fcmToken: { $exists: true, $ne: null } };
+    return { fcmToken: pushTokenQuery };
   }
 
   if (normalizedAudience === "users") {
@@ -129,7 +135,7 @@ const buildManualNotificationQuery = ({ audience, userIds, phoneNumbers }) => {
 
     return {
       _id: { $in: normalizedUserIds },
-      fcmToken: { $exists: true, $ne: null },
+      fcmToken: pushTokenQuery,
     };
   }
 
@@ -142,7 +148,7 @@ const buildManualNotificationQuery = ({ audience, userIds, phoneNumbers }) => {
 
     return {
       phone: { $in: normalizedPhones },
-      fcmToken: { $exists: true, $ne: null },
+      fcmToken: pushTokenQuery,
     };
   }
 
@@ -216,7 +222,7 @@ const sendManualNotification = async (req, res) => {
 
 const getNotificationRecipients = async (req, res) => {
   try {
-    const users = await User.find({ fcmToken: { $exists: true, $ne: null } })
+    const users = await User.find({ fcmToken: pushTokenQuery })
       .select("_id fullName phone email fcmToken")
       .sort({ createdAt: -1 });
 
@@ -228,7 +234,7 @@ const getNotificationRecipients = async (req, res) => {
         fullName: user.fullName,
         phone: user.phone,
         email: user.email,
-        hasFcmToken: Boolean(user.fcmToken),
+        hasFcmToken: Boolean(String(user.fcmToken || "").trim()),
       })),
     });
   } catch (error) {
@@ -256,7 +262,7 @@ const getCustomers = async (req, res) => {
         email: user.email,
         phone: user.phone,
         isActive: user.isActive,
-        hasFcmToken: Boolean(user.fcmToken),
+        hasFcmToken: Boolean(String(user.fcmToken || "").trim()),
         createdAt: user.createdAt,
         updatedAt: user.updatedAt,
       })),

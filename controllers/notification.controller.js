@@ -45,6 +45,12 @@ const normalizeRecipientIds = (value) =>
     .map((item) => String(item || "").trim())
     .filter((item) => mongoose.Types.ObjectId.isValid(item));
 
+const pushTokenQuery = {
+  $exists: true,
+  $type: "string",
+  $regex: /\S/,
+};
+
 const getNotifications = async (req, res) => {
   try {
     const notifications = await Notification.find()
@@ -102,10 +108,10 @@ const createNotification = async (req, res) => {
 
     const query =
       normalizedAudienceType === "all"
-        ? { fcmToken: { $exists: true, $ne: null } }
+        ? { fcmToken: pushTokenQuery }
         : {
             _id: { $in: selectedRecipientIds },
-            fcmToken: { $exists: true, $ne: null },
+            fcmToken: pushTokenQuery,
           };
 
     const recipients = await User.find(query).select(
@@ -133,7 +139,7 @@ const createNotification = async (req, res) => {
     });
 
     const status =
-      deliveryResult.failureCount === 0
+      deliveryResult.sentCount > 0 && deliveryResult.failureCount === 0
         ? "sent"
         : deliveryResult.sentCount > 0
           ? "partial"
@@ -161,7 +167,12 @@ const createNotification = async (req, res) => {
 
     return res.status(201).json({
       success: true,
-      message: "Notification sent successfully",
+      message:
+        status === "sent"
+          ? "Notification sent successfully"
+          : status === "partial"
+            ? "Notification sent to some customers"
+            : deliveryResult.message || "Notification could not be delivered",
       data: populatedNotification,
       delivery: deliveryResult,
     });

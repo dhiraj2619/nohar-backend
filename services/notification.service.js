@@ -13,6 +13,8 @@ const INVALID_TOKEN_ERRORS = new Set([
   "messaging/invalid-argument",
 ]);
 
+const FCM_BATCH_SIZE = 500;
+
 const parseServiceAccount = () => {
   if (FIREBASE_SERVICE_ACCOUNT_JSON) {
     try {
@@ -72,6 +74,16 @@ const sanitizeDataPayload = (data = {}) =>
 const dedupeTokens = (tokens = []) =>
   [...new Set(tokens.map((token) => String(token || "").trim()).filter(Boolean))];
 
+const chunkArray = (items = [], size = FCM_BATCH_SIZE) => {
+  const chunks = [];
+
+  for (let index = 0; index < items.length; index += size) {
+    chunks.push(items.slice(index, index + size));
+  }
+
+  return chunks;
+};
+
 const clearInvalidTokens = async (tokens = []) => {
   if (!tokens.length) {
     return;
@@ -98,7 +110,7 @@ const sendPushToTokens = async ({
 
   if (!normalizedTokens.length) {
     return {
-      success: true,
+      success: false,
       configured: Boolean(initializeFirebase()),
       sentCount: 0,
       failureCount: 0,
@@ -120,55 +132,63 @@ const sendPushToTokens = async ({
     };
   }
 
-  const payload = {
-    tokens: normalizedTokens,
-    notification: {
-      title: String(title || "").trim(),
-      body: String(body || "").trim(),
-    },
-    data: sanitizeDataPayload(data),
-    android: {
-      priority: "high",
+  const invalidTokens = [];
+  let sentCount = 0;
+  let failureCount = 0;
+
+  for (const tokenBatch of chunkArray(normalizedTokens)) {
+    const payload = {
+      tokens: tokenBatch,
       notification: {
-        channelId: "default",
-        sound: "default",
+        title: String(title || "").trim(),
+        body: String(body || "").trim(),
       },
-    },
-    apns: {
-      payload: {
-        aps: {
+      data: sanitizeDataPayload(data),
+      android: {
+        priority: "high",
+        notification: {
+          channelId: "default",
           sound: "default",
         },
       },
-    },
-  };
+      apns: {
+        payload: {
+          aps: {
+            sound: "default",
+          },
+        },
+      },
+    };
 
-  if (imageUrl) {
-    payload.notification.imageUrl = imageUrl;
+    if (imageUrl) {
+      payload.notification.imageUrl = imageUrl;
+    }
+
+    const response = await admin.messaging().sendEachForMulticast(payload);
+
+    sentCount += response.successCount;
+    failureCount += response.failureCount;
+
+    response.responses.forEach((result, index) => {
+      if (result.success) {
+        return;
+      }
+
+      if (INVALID_TOKEN_ERRORS.has(result.error?.code)) {
+        invalidTokens.push(tokenBatch[index]);
+      }
+    });
   }
-
-  const response = await admin.messaging().sendEachForMulticast(payload);
-
-  const invalidTokens = [];
-  response.responses.forEach((result, index) => {
-    if (result.success) {
-      return;
-    }
-
-    if (INVALID_TOKEN_ERRORS.has(result.error?.code)) {
-      invalidTokens.push(normalizedTokens[index]);
-    }
-  });
 
   if (invalidTokens.length) {
     await clearInvalidTokens(invalidTokens);
   }
 
   return {
-    success: response.failureCount === 0,
+    success: failureCount === 0,
     configured: true,
-    sentCount: response.successCount,
-    failureCount: response.failureCount,
+    sentCount,
+    failureCount,
     invalidTokensRemoved: invalidTokens.length,
   };
 };
