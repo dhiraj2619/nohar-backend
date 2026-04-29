@@ -15,6 +15,12 @@ const {
   updateSettings,
 } = require("../controllers/settings.controller");
 const {
+  createQuoteSlider,
+  deleteQuoteSlider,
+  getQuoteSliders,
+  updateQuoteSlider,
+} = require("../controllers/quoteslider.controller");
+const {
   advanceOrderPhase,
   getAdminOrderDetails,
   getOrders,
@@ -46,5 +52,19 @@ adminRouter.get("/ads", isAdminAuth, getAds);
 adminRouter.post("/ads", isAdminAuth, upload.single("image"), createAd);
 adminRouter.put("/ads/:id", isAdminAuth, upload.single("image"), updateAd);
 adminRouter.delete("/ads/:id", isAdminAuth, deleteAd);
+adminRouter.get("/quote-sliders", isAdminAuth, getQuoteSliders);
+adminRouter.post(
+  "/quote-sliders",
+  isAdminAuth,
+  upload.single("image"),
+  createQuoteSlider,
+);
+adminRouter.put(
+  "/quote-sliders/:id",
+  isAdminAuth,
+  upload.single("image"),
+  updateQuoteSlider,
+);
+adminRouter.delete("/quote-sliders/:id", isAdminAuth, deleteQuoteSlider);
 
 module.exports = { adminRouter };
