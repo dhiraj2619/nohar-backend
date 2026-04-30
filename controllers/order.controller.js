@@ -29,7 +29,7 @@ const INVOICE_LOGO_PATH = path.join(
 );
 const DEFAULT_STORE_DETAILS = {
   storeName: "Nohar Cosmetics",
-  ownerName: "Nohar Owner",
+  GSTNumber: "27CAAPB9203J2ZX",
   email: "noharcosmetics@gmail.com",
   address: "Dwarka Circle, Kathe Lane, Nashik, Maharashtra, India",
   gstNumber: "",
@@ -48,7 +48,10 @@ const normalizeNumber = (value) => {
 };
 
 const normalizeEmail = (value) => String(value || "").trim();
-const normalizeSmtpPass = (value) => String(value || "").replace(/\s+/g, "").trim();
+const normalizeSmtpPass = (value) =>
+  String(value || "")
+    .replace(/\s+/g, "")
+    .trim();
 
 const ORDER_PHASES = [
   "ORDER_PLACED",
@@ -58,7 +61,9 @@ const ORDER_PHASES = [
 ];
 
 const normalizeOrderStatus = (status) => {
-  const normalized = String(status || "").trim().toUpperCase();
+  const normalized = String(status || "")
+    .trim()
+    .toUpperCase();
 
   const statusMap = {
     PROCESSING: "ORDER_PLACED",
@@ -121,7 +126,10 @@ const applyOrderStatusSideEffects = (order, nextStatus) => {
   }
 };
 
-const getShortOrderId = (order) => String(order?._id || "").slice(-6).toUpperCase();
+const getShortOrderId = (order) =>
+  String(order?._id || "")
+    .slice(-6)
+    .toUpperCase();
 const getOrderNumber = (order) => order?.orderNumber || getShortOrderId(order);
 const getInvoiceNumber = (order) => {
   const orderNumber = String(getOrderNumber(order) || "")
@@ -141,7 +149,8 @@ const normalizeCurrencyValue = (amount) => {
   return Number.isNaN(numericAmount) ? 0 : numericAmount;
 };
 
-const hasNumberValue = (value) => value !== undefined && value !== null && value !== "";
+const hasNumberValue = (value) =>
+  value !== undefined && value !== null && value !== "";
 
 const normalizePartialPaymentType = (value, fallback = "PERCENT") => {
   const normalizedValue = String(value || "")
@@ -251,13 +260,12 @@ const getStoreDetails = async () => {
 
   return {
     storeName: DEFAULT_STORE_DETAILS.storeName,
-    ownerName:
-      settings?.ownerName?.trim() || DEFAULT_STORE_DETAILS.ownerName,
     email: settings?.email?.trim() || DEFAULT_STORE_DETAILS.email,
     address: settings?.address?.trim() || DEFAULT_STORE_DETAILS.address,
     gstNumber: settings?.gstNumber?.trim() || DEFAULT_STORE_DETAILS.gstNumber,
     authorizedSignatory:
-      settings?.authorizedSignatory || DEFAULT_STORE_DETAILS.authorizedSignatory,
+      settings?.authorizedSignatory ||
+      DEFAULT_STORE_DETAILS.authorizedSignatory,
     allowCOD:
       settings?.allowCOD !== undefined
         ? Boolean(settings.allowCOD)
@@ -270,14 +278,12 @@ const getStoreDetails = async () => {
       settings?.partialPaymentType,
       DEFAULT_STORE_DETAILS.partialPaymentType,
     ),
-    partialPaymentValue:
-      hasNumberValue(settings?.partialPaymentValue)
-        ? Number(settings.partialPaymentValue)
-        : DEFAULT_STORE_DETAILS.partialPaymentValue,
-    freeShippingAbove:
-      hasNumberValue(settings?.freeShippingAbove)
-        ? Number(settings.freeShippingAbove)
-        : DEFAULT_STORE_DETAILS.freeShippingAbove,
+    partialPaymentValue: hasNumberValue(settings?.partialPaymentValue)
+      ? Number(settings.partialPaymentValue)
+      : DEFAULT_STORE_DETAILS.partialPaymentValue,
+    freeShippingAbove: hasNumberValue(settings?.freeShippingAbove)
+      ? Number(settings.freeShippingAbove)
+      : DEFAULT_STORE_DETAILS.freeShippingAbove,
     maintenanceMode:
       settings?.maintenanceMode !== undefined
         ? Boolean(settings.maintenanceMode)
@@ -377,11 +383,7 @@ const getInvoiceItemsWithGst = async (items = []) => {
     getPlainOrderItem,
   );
   const productIds = [
-    ...new Set(
-      normalizedItems
-        .map(getOrderItemProductId)
-        .filter(Boolean),
-    ),
+    ...new Set(normalizedItems.map(getOrderItemProductId).filter(Boolean)),
   ];
 
   if (!productIds.length) {
@@ -455,13 +457,7 @@ const drawTextLines = ({
   return cursorY;
 };
 
-const drawInvoiceTable = ({
-  doc,
-  items,
-  startX,
-  startY,
-  contentWidth,
-}) => {
+const drawInvoiceTable = ({ doc, items, startX, startY, contentWidth }) => {
   const columns = [
     { label: "Sl.", width: 32, align: "left" },
     { label: "Product Title", width: 255, align: "left" },
@@ -589,9 +585,7 @@ const buildInvoicePdf = async ({ order, customer, res }) => {
   const leftX = doc.page.margins.left;
   const rightX = leftX + pageWidth - 170;
 
-  doc
-    .roundedRect(leftX, 28, pageWidth, 110, 18)
-    .fill("#f8f3ee");
+  doc.roundedRect(leftX, 28, pageWidth, 110, 18).fill("#f8f3ee");
 
   if (fs.existsSync(INVOICE_LOGO_PATH)) {
     doc.image(INVOICE_LOGO_PATH, leftX + 18, 46, {
@@ -883,9 +877,13 @@ const sendOrderPlacedEmails = async ({ order, customer, customerEmail }) => {
   try {
     const orderNumber = getOrderNumber(order);
     const customerName = customer?.fullName || "Customer";
-    const normalizedCustomerEmail = normalizeEmail(customer?.email || customerEmail || "");
-    const orderItemsText = getOrderItemsText(order) || "No order items available";
-    const orderItemsHtml = getOrderItemsHtml(order) || "<li>No order items available</li>";
+    const normalizedCustomerEmail = normalizeEmail(
+      customer?.email || customerEmail || "",
+    );
+    const orderItemsText =
+      getOrderItemsText(order) || "No order items available";
+    const orderItemsHtml =
+      getOrderItemsHtml(order) || "<li>No order items available</li>";
     const shippingAddress = [
       order?.shippingInfo?.flatNo,
       order?.shippingInfo?.area,
@@ -1042,9 +1040,7 @@ const notifyOrderUser = async (userId, order, status) => {
 
 const runPostOrderTasks = ({ userId, order, customer, customerEmail }) => {
   setImmediate(async () => {
-    await Promise.allSettled([
-      notifyOrderUser(userId, order, "ORDER_PLACED"),
-    ]);
+    await Promise.allSettled([notifyOrderUser(userId, order, "ORDER_PLACED")]);
   });
 };
 
@@ -1062,11 +1058,21 @@ const createOrder = async (req, res) => {
       customerEmail,
     } = req.body;
 
-    const normalizedPaymentMode = String(paymentMode || "").trim().toUpperCase();
-    const normalizedCustomerEmail = String(customerEmail || "").trim().toLowerCase();
+    const normalizedPaymentMode = String(paymentMode || "")
+      .trim()
+      .toUpperCase();
+    const normalizedCustomerEmail = String(customerEmail || "")
+      .trim()
+      .toLowerCase();
     const storeDetails = await getStoreDetails();
 
-    if (!userId || !shippingId || !orderItems || !totalPrice || !normalizedPaymentMode) {
+    if (
+      !userId ||
+      !shippingId ||
+      !orderItems ||
+      !totalPrice ||
+      !normalizedPaymentMode
+    ) {
       return res
         .status(400)
         .json({ success: false, message: "Missing required fields" });
@@ -1081,7 +1087,8 @@ const createOrder = async (req, res) => {
     if (storeDetails.maintenanceMode) {
       return res.status(503).json({
         success: false,
-        message: "Orders are temporarily unavailable because maintenance mode is enabled",
+        message:
+          "Orders are temporarily unavailable because maintenance mode is enabled",
       });
     }
 
@@ -1105,7 +1112,8 @@ const createOrder = async (req, res) => {
     }
 
     const requiresOnlinePayment =
-      normalizedPaymentMode === "FULL" || normalizedPaymentMode === "PARTIAL_COD";
+      normalizedPaymentMode === "FULL" ||
+      normalizedPaymentMode === "PARTIAL_COD";
 
     if (requiresOnlinePayment && !paymentId) {
       return res
@@ -1120,10 +1128,14 @@ const createOrder = async (req, res) => {
       });
     }
 
-    const customer = await User.findById(userId).select("_id fullName email phone fcmToken");
+    const customer = await User.findById(userId).select(
+      "_id fullName email phone fcmToken",
+    );
 
     if (!customer) {
-      return res.status(404).json({ success: false, message: "User not found" });
+      return res
+        .status(404)
+        .json({ success: false, message: "User not found" });
     }
 
     const shippingInfo = await ShippingInfo.findById(shippingId);
@@ -1499,7 +1511,11 @@ const updateOrderStatus = async (req, res) => {
 
     res
       .status(200)
-      .json({ success: true, message: "Order status updated", order: populatedOrder });
+      .json({
+        success: true,
+        message: "Order status updated",
+        order: populatedOrder,
+      });
   } catch (error) {
     res.status(500).json({
       success: false,
