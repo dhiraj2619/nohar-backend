@@ -109,6 +109,7 @@ const updateSettings = async (req, res) => {
       ownerName,
       email,
       address,
+      gstNumber,
       maintenanceMode,
       allowCOD,
       allowCod,
@@ -126,6 +127,9 @@ const updateSettings = async (req, res) => {
       settings.email = String(email || "").trim().toLowerCase();
     }
     if (address !== undefined) settings.address = String(address || "").trim();
+    if (gstNumber !== undefined) {
+      settings.gstNumber = String(gstNumber || "").trim();
+    }
     if (maintenanceMode !== undefined) {
       settings.maintenanceMode = toBoolean(maintenanceMode, false);
     }

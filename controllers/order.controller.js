@@ -32,6 +32,7 @@ const DEFAULT_STORE_DETAILS = {
   ownerName: "Nohar Owner",
   email: "noharcosmetics@gmail.com",
   address: "Dwarka Circle, Kathe Lane, Nashik, Maharashtra, India",
+  gstNumber: "",
   authorizedSignatory: "Nohar Cosmetics",
   allowCOD: true,
   allowPartial: false,
@@ -254,6 +255,7 @@ const getStoreDetails = async () => {
       settings?.ownerName?.trim() || DEFAULT_STORE_DETAILS.ownerName,
     email: settings?.email?.trim() || DEFAULT_STORE_DETAILS.email,
     address: settings?.address?.trim() || DEFAULT_STORE_DETAILS.address,
+    gstNumber: settings?.gstNumber?.trim() || DEFAULT_STORE_DETAILS.gstNumber,
     authorizedSignatory:
       settings?.authorizedSignatory || DEFAULT_STORE_DETAILS.authorizedSignatory,
     allowCOD:
@@ -298,43 +300,106 @@ const getRemoteImageBuffer = async (url) => {
   }
 };
 
+const getPlainOrderItem = (item) => {
+  if (!item) return {};
+  if (typeof item.toObject === "function") return item.toObject();
+  if (item._doc && typeof item._doc === "object") return { ...item._doc };
+  return { ...item };
+};
+
+const getOrderItemProductId = (item = {}) => {
+  const product = item?.product || item?.productId;
+
+  if (product && typeof product === "object") {
+    return String(product?._id || product?.id || "").trim();
+  }
+
+  return String(product || "").trim();
+};
+
+const getProductImageUrl = (product = {}) =>
+  product?.image ||
+  product?.thumbnail?.url ||
+  product?.images?.[0]?.url ||
+  product?.guideImage?.url ||
+  "";
+
+const normalizeInvoiceItem = (item = {}, product = {}) => {
+  const productFromItem =
+    item?.product && typeof item.product === "object" ? item.product : {};
+  const rawQuantity = Number(
+    item?.quantity ?? item?.qty ?? item?.count ?? item?.productQuantity ?? 1,
+  );
+  const rawPrice = Number(
+    item?.price ??
+      item?.discountprice ??
+      item?.discountPrice ??
+      product?.discountprice ??
+      product?.finalPrice ??
+      product?.price ??
+      0,
+  );
+  const name = String(
+    item?.name ||
+      item?.productName ||
+      item?.productTitle ||
+      item?.title ||
+      productFromItem?.name ||
+      productFromItem?.title ||
+      product?.name ||
+      product?.title ||
+      "Product",
+  ).trim();
+
+  return {
+    ...item,
+    name: name || "Product",
+    quantity: Number.isFinite(rawQuantity) && rawQuantity > 0 ? rawQuantity : 1,
+    price: Number.isFinite(rawPrice) ? rawPrice : 0,
+    image:
+      item?.image ||
+      getProductImageUrl(productFromItem) ||
+      getProductImageUrl(product),
+    product: getOrderItemProductId(item),
+    gstRate:
+      item?.gstRate !== undefined && item?.gstRate !== null
+        ? Number(item.gstRate || 0)
+        : Number(product?.gstRate || productFromItem?.gstRate || 0),
+    hsnCode:
+      typeof item?.hsnCode === "string" && item.hsnCode.trim()
+        ? item.hsnCode.trim()
+        : String(product?.hsnCode || productFromItem?.hsnCode || "").trim(),
+  };
+};
+
 const getInvoiceItemsWithGst = async (items = []) => {
-  const normalizedItems = Array.isArray(items) ? items : [];
+  const normalizedItems = (Array.isArray(items) ? items : []).map(
+    getPlainOrderItem,
+  );
   const productIds = [
     ...new Set(
       normalizedItems
-        .map((item) => String(item?.product || ""))
+        .map(getOrderItemProductId)
         .filter(Boolean),
     ),
   ];
 
   if (!productIds.length) {
-    return normalizedItems.map((item) => ({
-      ...item,
-      gstRate: Number(item?.gstRate || 0),
-    }));
+    return normalizedItems.map((item) => normalizeInvoiceItem(item));
   }
 
   const products = await Product.find({ _id: { $in: productIds } })
-    .select("_id gstRate hsnCode")
+    .select(
+      "_id name price finalPrice discountprice images guideImage gstRate hsnCode",
+    )
     .lean();
   const productById = new Map(
     products.map((product) => [String(product._id), product]),
   );
 
-  return normalizedItems.map((item) => ({
-    ...item,
-    gstRate:
-      item?.gstRate !== undefined && item?.gstRate !== null
-        ? Number(item.gstRate || 0)
-        : Number(productById.get(String(item?.product || ""))?.gstRate || 0),
-    hsnCode:
-      typeof item?.hsnCode === "string" && item.hsnCode.trim()
-        ? item.hsnCode.trim()
-        : String(
-            productById.get(String(item?.product || ""))?.hsnCode || "",
-          ).trim(),
-  }));
+  return normalizedItems.map((item) =>
+    normalizeInvoiceItem(item, productById.get(getOrderItemProductId(item))),
+  );
 };
 
 const getCustomerDisplayName = (customer, order) =>
@@ -603,7 +668,7 @@ const buildInvoicePdf = async ({ order, customer, res }) => {
     doc,
     lines: [
       storeDetails.storeName,
-      `Owner: ${storeDetails.ownerName}`,
+      `GST No: ${storeDetails.gstNumber || "N/A"}`,
       storeDetails.address,
       `Email: ${storeDetails.email}`,
     ],
@@ -1173,7 +1238,9 @@ const createOrder = async (req, res) => {
       ),
     ];
     const orderedProducts = await Product.find({ _id: { $in: productIds } })
-      .select("_id gstRate hsnCode")
+      .select(
+        "_id name price finalPrice discountprice images guideImage gstRate hsnCode",
+      )
       .lean();
     const productById = new Map(
       orderedProducts.map((product) => [String(product._id), product]),
@@ -1182,18 +1249,13 @@ const createOrder = async (req, res) => {
       const productId = String(item?.product || item?.productId || "").trim();
       const productMeta = productById.get(productId) || {};
 
-      return {
-        ...item,
-        product: productId,
-        gstRate:
-          item?.gstRate !== undefined && item?.gstRate !== null
-            ? Number(item.gstRate || 0)
-            : Number(productMeta.gstRate || 0),
-        hsnCode:
-          typeof item?.hsnCode === "string" && item.hsnCode.trim()
-            ? item.hsnCode.trim()
-            : String(productMeta.hsnCode || "").trim(),
-      };
+      return normalizeInvoiceItem(
+        {
+          ...item,
+          product: productId,
+        },
+        productMeta,
+      );
     });
 
     const order = new Order({

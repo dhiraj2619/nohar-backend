@@ -32,6 +32,11 @@ const adminInfoSchema = new mongoose.Schema(
       trim: true,
       default: "Dwarka Circle, Kathe Lane, Nashik, Maharashtra, India",
     },
+    gstNumber: {
+      type: String,
+      trim: true,
+      default: "",
+    },
     authorizedSignatory: {
       type: mediaSchema,
       default: null,
