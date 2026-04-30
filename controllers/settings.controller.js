@@ -20,6 +20,15 @@ const normalizePartialPaymentType = (value, fallback = "PERCENT") => {
   return fallback;
 };
 
+const applyNoStoreHeaders = (res) => {
+  res.set({
+    "Cache-Control": "no-store, no-cache, must-revalidate, proxy-revalidate",
+    Pragma: "no-cache",
+    Expires: "0",
+    "Surrogate-Control": "no-store",
+  });
+};
+
 const getOrCreateSettings = async () => {
   let settings = await AdminInfo.findOne();
 
@@ -51,6 +60,7 @@ const buildPublicSettingsPayload = (settings) => ({
     settings?.maintenanceMode !== undefined
       ? Boolean(settings.maintenanceMode)
       : false,
+  updatedAt: settings?.updatedAt || settings?.createdAt || new Date(),
 });
 
 const uploadAuthorizedSignatoryImage = async (file) => {
@@ -69,6 +79,7 @@ const uploadAuthorizedSignatoryImage = async (file) => {
 const getSettings = async (req, res) => {
   try {
     const settings = await getOrCreateSettings();
+    applyNoStoreHeaders(res);
 
     return res.status(200).json({
       success: true,
@@ -87,6 +98,7 @@ const getSettings = async (req, res) => {
 const getPublicSettings = async (req, res) => {
   try {
     const settings = await getOrCreateSettings();
+    applyNoStoreHeaders(res);
 
     return res.status(200).json({
       success: true,
@@ -182,6 +194,7 @@ const updateSettings = async (req, res) => {
     }
 
     await settings.save();
+    applyNoStoreHeaders(res);
 
     return res.status(200).json({
       success: true,
