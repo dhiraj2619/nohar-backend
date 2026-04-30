@@ -112,6 +112,10 @@ const normalizeProductPersistenceFields = (product) => ({
     product.gstIncluded !== undefined ? Boolean(product.gstIncluded) : true,
   discountprice: toNumber(product.discountprice, 0),
   finalPrice: toNumber(product.finalPrice, 0),
+  insideStock:
+    product.insideStock !== undefined ? Boolean(product.insideStock) : true,
+  isMostBuy:
+    product.isMostBuy !== undefined ? Boolean(product.isMostBuy) : false,
 });
 
 const applyProductDefaults = (product) => {
