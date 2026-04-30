@@ -29,10 +29,9 @@ const INVOICE_LOGO_PATH = path.join(
 );
 const DEFAULT_STORE_DETAILS = {
   storeName: "Nohar Cosmetics",
-  GSTNumber: "27CAAPB9203J2ZX",
   email: "noharcosmetics@gmail.com",
   address: "Dwarka Circle, Kathe Lane, Nashik, Maharashtra, India",
-  gstNumber: "",
+  gstNumber: "27CAAPB9203J2ZX",
   authorizedSignatory: "Nohar Cosmetics",
   allowCOD: true,
   allowPartial: false,
@@ -262,7 +261,11 @@ const getStoreDetails = async () => {
     storeName: DEFAULT_STORE_DETAILS.storeName,
     email: settings?.email?.trim() || DEFAULT_STORE_DETAILS.email,
     address: settings?.address?.trim() || DEFAULT_STORE_DETAILS.address,
-    gstNumber: settings?.gstNumber?.trim() || DEFAULT_STORE_DETAILS.gstNumber,
+    gstNumber:
+      settings?.gstNumber?.trim() ||
+      DEFAULT_STORE_DETAILS.gstNumber ||
+      DEFAULT_STORE_DETAILS.GSTNumber ||
+      "",
     authorizedSignatory:
       settings?.authorizedSignatory ||
       DEFAULT_STORE_DETAILS.authorizedSignatory,
@@ -334,17 +337,48 @@ const normalizeInvoiceItem = (item = {}, product = {}) => {
   const productFromItem =
     item?.product && typeof item.product === "object" ? item.product : {};
   const rawQuantity = Number(
-    item?.quantity ?? item?.qty ?? item?.count ?? item?.productQuantity ?? 1,
+    item?.quantity ??
+      item?.qty ??
+      item?.count ??
+      item?.productQuantity ??
+      productFromItem?.quantity ??
+      productFromItem?.qty ??
+      1,
   );
-  const rawPrice = Number(
+  const normalizedQuantity =
+    Number.isFinite(rawQuantity) && rawQuantity > 0 ? rawQuantity : 1;
+  const rawLineAmount = Number(
+    item?.amount ??
+      item?.total ??
+      item?.lineAmount ??
+      item?.lineTotal ??
+      item?.subtotal ??
+      0,
+  );
+  const rawUnitPrice = Number(
     item?.price ??
+      item?.unitPrice ??
+      item?.sellingPrice ??
       item?.discountprice ??
       item?.discountPrice ??
+      item?.finalPrice ??
+      productFromItem?.price ??
+      productFromItem?.unitPrice ??
+      productFromItem?.sellingPrice ??
+      productFromItem?.discountprice ??
+      productFromItem?.discountPrice ??
+      productFromItem?.finalPrice ??
       product?.discountprice ??
       product?.finalPrice ??
       product?.price ??
       0,
   );
+  const resolvedPrice =
+    Number.isFinite(rawUnitPrice) && rawUnitPrice > 0
+      ? rawUnitPrice
+      : Number.isFinite(rawLineAmount) && rawLineAmount > 0
+        ? rawLineAmount / normalizedQuantity
+        : 0;
   const name = String(
     item?.name ||
       item?.productName ||
@@ -360,8 +394,8 @@ const normalizeInvoiceItem = (item = {}, product = {}) => {
   return {
     ...item,
     name: name || "Product",
-    quantity: Number.isFinite(rawQuantity) && rawQuantity > 0 ? rawQuantity : 1,
-    price: Number.isFinite(rawPrice) ? rawPrice : 0,
+    quantity: normalizedQuantity,
+    price: Number.isFinite(resolvedPrice) ? resolvedPrice : 0,
     image:
       item?.image ||
       getProductImageUrl(productFromItem) ||
@@ -370,7 +404,15 @@ const normalizeInvoiceItem = (item = {}, product = {}) => {
     gstRate:
       item?.gstRate !== undefined && item?.gstRate !== null
         ? Number(item.gstRate || 0)
-        : Number(product?.gstRate || productFromItem?.gstRate || 0),
+        : item?.gst !== undefined && item?.gst !== null
+          ? Number(item.gst || 0)
+          : Number(
+              product?.gstRate ||
+                productFromItem?.gstRate ||
+                productFromItem?.gst ||
+                product?.gst ||
+                0,
+            ),
     hsnCode:
       typeof item?.hsnCode === "string" && item.hsnCode.trim()
         ? item.hsnCode.trim()
@@ -460,7 +502,7 @@ const drawTextLines = ({
 const drawInvoiceTable = ({ doc, items, startX, startY, contentWidth }) => {
   const columns = [
     { label: "Sl.", width: 32, align: "left" },
-    { label: "Product Title", width: 255, align: "left" },
+    { label: "Product", width: 255, align: "left" },
     { label: "Qty", width: 40, align: "center" },
     { label: "GST %", width: 60, align: "center" },
     { label: "Amount", width: 136, align: "right" },
