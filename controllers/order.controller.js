@@ -758,9 +758,6 @@ const buildInvoicePdf = async ({ order, customer, res }) => {
     ["Items Total", formatCurrency(itemTotal)],
     ["GST Rates", gstSummary || "0%"],
     ["Estimated GST", formatCurrency(totalGstAmount)],
-    ["Shipping", shippingCharge > 0 ? formatCurrency(shippingCharge) : "Free"],
-    ["Amount Paid", formatCurrency(order?.amountPaid || 0)],
-    ["Amount Due", formatCurrency(order?.amountDue || 0)],
     ["Grand Total", formatCurrency(totalAmount)],
   ];
 
