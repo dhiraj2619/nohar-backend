@@ -434,7 +434,7 @@ const getInvoiceItemsWithGst = async (items = []) => {
 
   const products = await Product.find({ _id: { $in: productIds } })
     .select(
-      "_id name price finalPrice discountprice images guideImage gstRate hsnCode",
+      "_id name price finalPrice discountprice images guideImage gstRate gst hsnCode",
     )
     .lean();
   const productById = new Map(
@@ -546,7 +546,7 @@ const drawInvoiceTable = ({ doc, items, startX, startY, contentWidth }) => {
         ? `${item?.name || "Product"}\nHSN: ${item.hsnCode}`
         : item?.name || "Product",
       String(quantity),
-      `${gstRate}%`,
+      `${Number.isFinite(gstRate) ? gstRate : 0}%`,
       formatCurrency(amount),
     ];
 
@@ -762,7 +762,7 @@ const buildInvoicePdf = async ({ order, customer, res }) => {
   ];
 
   doc
-    .roundedRect(totalsX, totalsTop, totalsBoxWidth, 154, 14)
+    .roundedRect(totalsX, totalsTop, totalsBoxWidth, 100, 14)
     .fillAndStroke("#f8f3ee", "#eadfd8");
 
   totals.forEach(([label, value], index) => {
@@ -787,7 +787,7 @@ const buildInvoicePdf = async ({ order, customer, res }) => {
       });
   });
 
-  const notesTop = totalsTop + 174;
+  const notesTop = totalsTop + 120;
 
   doc
     .font("Helvetica-Bold")
@@ -1290,7 +1290,7 @@ const createOrder = async (req, res) => {
     ];
     const orderedProducts = await Product.find({ _id: { $in: productIds } })
       .select(
-        "_id name price finalPrice discountprice images guideImage gstRate hsnCode",
+        "_id name price finalPrice discountprice images guideImage gstRate gst hsnCode",
       )
       .lean();
     const productById = new Map(
