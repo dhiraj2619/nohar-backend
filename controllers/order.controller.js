@@ -602,6 +602,13 @@ const buildInvoicePdf = async ({ order, customer, res }) => {
   }, 0);
   const totalAmount = normalizeCurrencyValue(order?.totalPrice || itemTotal);
   const shippingCharge = Number((totalAmount - itemTotal).toFixed(2));
+  const freeShippingThreshold =
+    normalizeCurrencyValue(storeDetails?.freeShippingAbove) > 0
+      ? normalizeCurrencyValue(storeDetails.freeShippingAbove)
+      : 499;
+  const shouldShowShippingRow =
+    normalizeCurrencyValue(itemTotal) < freeShippingThreshold ||
+    shippingCharge > 0;
   const paymentLabel =
     order?.paymentMode === "PARTIAL_COD"
       ? "Partial COD"
@@ -758,11 +765,14 @@ const buildInvoicePdf = async ({ order, customer, res }) => {
     ["Items Total", formatCurrency(itemTotal)],
     ["GST Rates", gstSummary || "0%"],
     ["Estimated GST", formatCurrency(totalGstAmount)],
+    ...(shouldShowShippingRow
+      ? [["Shipping", shippingCharge > 0 ? formatCurrency(shippingCharge) : "Free"]]
+      : []),
     ["Grand Total", formatCurrency(totalAmount)],
   ];
 
   doc
-    .roundedRect(totalsX, totalsTop, totalsBoxWidth, 100, 14)
+    .roundedRect(totalsX, totalsTop, totalsBoxWidth, 82 + totals.length * 18, 14)
     .fillAndStroke("#f8f3ee", "#eadfd8");
 
   totals.forEach(([label, value], index) => {
@@ -787,7 +797,7 @@ const buildInvoicePdf = async ({ order, customer, res }) => {
       });
   });
 
-  const notesTop = totalsTop + 120;
+  const notesTop = totalsTop + 48 + totals.length * 18;
 
   doc
     .font("Helvetica-Bold")
