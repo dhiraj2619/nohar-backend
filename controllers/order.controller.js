@@ -1131,11 +1131,7 @@ const createOrder = async (req, res) => {
       });
     }
 
-    if (
-      !storeDetails.allowCOD &&
-      (normalizedPaymentMode === "COD" ||
-        normalizedPaymentMode === "PARTIAL_COD")
-    ) {
+    if (!storeDetails.allowCOD && normalizedPaymentMode === "COD") {
       return res.status(400).json({
         success: false,
         message: "Cash on delivery is currently disabled",
