@@ -52,6 +52,10 @@ app.get("/privacy-policy", (req, res) => {
   res.sendFile(path.join(__dirname, "public", "privacy-policy.html"));
 });
 
+app.get("/delete-account", (req, res) => {
+  res.sendFile(path.join(__dirname, "public", "delete-account.html"));
+});
+
 app.use("/api/v1/categories", categoryRouter);
 app.use("/api/v1/collections", collectionRouter);
 app.use("/api/v1/products", productRouter);
