@@ -1,6 +1,7 @@
 require("dotenv").config();
 
 const express = require("express");
+const path = require("path");
 const cloudinary = require("cloudinary");
 const cookieparser = require("cookie-parser");
 const cors = require("cors");
@@ -45,6 +46,10 @@ app.use(cors());
 
 app.get("/", (req, res) => {
   res.send(`<center><h1>Server is Started...</h1></center>`);
+});
+
+app.get("/privacy-policy", (req, res) => {
+  res.sendFile(path.join(__dirname, "public", "privacy-policy.html"));
 });
 
 app.use("/api/v1/categories", categoryRouter);
