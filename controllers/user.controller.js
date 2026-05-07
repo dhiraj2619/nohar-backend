@@ -17,6 +17,14 @@ const User = require("../models/users.model");
 
 const generateOTP = () => Math.floor(100000 + Math.random() * 900000);
 const normalizeEmail = (value) => String(value || "").trim();
+const normalizePhone = (value) => {
+  const digits = String(value || "").replace(/\D/g, "");
+  return digits.length > 10 ? digits.slice(-10) : digits;
+};
+const normalizeAppSignature = (value) => {
+  const signature = String(value || "").trim();
+  return /^[A-Za-z0-9+/]{11}$/.test(signature) ? signature : "";
+};
 
 const formatCurrency = (amount) => {
   const numericAmount = Number(amount || 0);
@@ -130,23 +138,37 @@ const sendBrevoEmail = async ({ to, subject, text, html }) => {
 
 const sendOTP = async (req, res) => {
   try {
-    const { phone } = req.body;
+    const { phone, appSignature } = req.body;
+    const cleanPhone = normalizePhone(phone);
 
-    console.log("entered phone", phone);
-
-    if (!phone) {
+    if (!cleanPhone) {
       return res.status(400).json({
         success: false,
         message: "Phone number is required",
       });
     }
 
+    if (!/^[6-9]\d{9}$/.test(cleanPhone)) {
+      return res.status(400).json({
+        success: false,
+        message: "Please enter a valid 10 digit mobile number",
+      });
+    }
+
     const otp = generateOTP();
     const otpExpiry = new Date(Date.now() + 10 * 60 * 1000); // OTP valid for 10 minutes
+    const androidAppSignature =
+      normalizeAppSignature(appSignature) ||
+      normalizeAppSignature(ANDROID_APP_SIGNATURE);
 
-    const msg = `Dear Customer Your Nohar cosmetics login OTP is ${otp} It will expire in next 10 mins. Please do not share code with anyone.\r\n${ANDROID_APP_SIGNATURE}`;
+    const msg = [
+      `Dear Customer Your Nohar cosmetics login OTP is ${otp} It will expire in next 10 mins. Please do not share code with anyone.`,
+      androidAppSignature,
+    ]
+      .filter(Boolean)
+      .join("\r\n");
 
-    const url = `https://kutility.org/app/smsapi/index.php?key=${OTP_API_KEY}&campaign=${OTP_CAMPAIGN}&routeid=${OTP_ROUTE}&type=text&contacts=${phone}&senderid=${OTP_SENDER_ID}&msg=${encodeURIComponent(msg)}&template_id=${OTP_TEMPLATE_ID}&pe_id=${OTP_PE_ID}`;
+    const url = `https://kutility.org/app/smsapi/index.php?key=${OTP_API_KEY}&campaign=${OTP_CAMPAIGN}&routeid=${OTP_ROUTE}&type=text&contacts=${cleanPhone}&senderid=${OTP_SENDER_ID}&msg=${encodeURIComponent(msg)}&template_id=${OTP_TEMPLATE_ID}&pe_id=${OTP_PE_ID}`;
 
     const response = await axios.get(url);
 
@@ -156,10 +178,6 @@ const sendOTP = async (req, res) => {
         message: "SMS vendor did not return a valid response",
       });
     }
-
-    const normalizePhone = (phone) => phone.replace(/\D/g, "");
-
-    const cleanPhone = normalizePhone(phone);
 
     await Otp.findOneAndUpdate(
       { phone: cleanPhone },
@@ -191,7 +209,6 @@ const verifyOTP = async (req, res) => {
       });
     }
 
-    const normalizePhone = (phone) => phone.replace(/\D/g, "");
     const cleanPhone = normalizePhone(phone);
 
     const otpRecord = await Otp.findOne({ phone: cleanPhone });

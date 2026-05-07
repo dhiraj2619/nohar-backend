@@ -25,6 +25,7 @@ const { shippingRouter } = require("./routes/shipping.route");
 const { paymentRouter } = require("./routes/payment.route");
 const orderRouter = require("./routes/order.route");
 const { notificationRouter } = require("./routes/notification.route");
+const { locationRouter } = require("./routes/location.route");
 const { initializeFirebase } = require("./services/notification.service");
 
 const app = express();
@@ -66,6 +67,7 @@ app.use("/api/v1/users", userRouter);
 app.use("/api/v1/shipping", shippingRouter);
 app.use("/api/v1/payment", paymentRouter);
 app.use("/api/v1/orders", orderRouter);
+app.use("/api/v1/locations", locationRouter);
 
 // admin routes
 app.use("/api/v1/admin", adminRouter);
