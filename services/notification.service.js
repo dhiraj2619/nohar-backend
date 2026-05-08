@@ -162,6 +162,7 @@ const sendPushToTokens = async ({
 
     if (imageUrl) {
       payload.notification.imageUrl = imageUrl;
+      payload.android.notification.imageUrl = imageUrl;
     }
 
     const response = await admin.messaging().sendEachForMulticast(payload);

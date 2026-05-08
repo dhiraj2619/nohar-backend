@@ -113,16 +113,17 @@ const deleteNotification = async (req, res) => {
 
 const createNotification = async (req, res) => {
   try {
-    const { title, audienceType = "all", recipientIds } = req.body;
+    const { title, description, audienceType = "all", recipientIds } = req.body;
     const normalizedTitle = String(title || "").trim();
+    const normalizedDescription = String(description || "").trim();
     const normalizedAudienceType = String(audienceType || "all")
       .trim()
       .toLowerCase();
 
-    if (!normalizedTitle) {
+    if (!normalizedTitle || !normalizedDescription) {
       return res.status(400).json({
         success: false,
-        message: "Title is required",
+        message: "Title and description are required",
       });
     }
 
@@ -169,10 +170,14 @@ const createNotification = async (req, res) => {
     const deliveryResult = await sendPushToUsers({
       users: recipients,
       title: normalizedTitle,
-      body: normalizedTitle,
+      body: normalizedDescription,
       data: {
         type: "ADMIN_NOTIFICATION",
         audienceType: normalizedAudienceType,
+        title: normalizedTitle,
+        body: normalizedDescription,
+        description: normalizedDescription,
+        imageUrl: image?.url || "",
       },
       imageUrl: image?.url,
     });
@@ -186,6 +191,7 @@ const createNotification = async (req, res) => {
 
     const notification = await Notification.create({
       title: normalizedTitle,
+      description: normalizedDescription,
       image,
       audienceType: normalizedAudienceType,
       recipients: recipients.map((user) => user._id),
