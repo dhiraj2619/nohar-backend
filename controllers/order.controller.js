@@ -766,13 +766,24 @@ const buildInvoicePdf = async ({ order, customer, res }) => {
     ["GST Rates", gstSummary || "0%"],
     ["Estimated GST", formatCurrency(totalGstAmount)],
     ...(shouldShowShippingRow
-      ? [["Shipping", shippingCharge > 0 ? formatCurrency(shippingCharge) : "Free"]]
+      ? [
+          [
+            "Shipping",
+            shippingCharge > 0 ? formatCurrency(shippingCharge) : "Free",
+          ],
+        ]
       : []),
     ["Grand Total", formatCurrency(totalAmount)],
   ];
 
   doc
-    .roundedRect(totalsX, totalsTop, totalsBoxWidth, 82 + totals.length * 18, 14)
+    .roundedRect(
+      totalsX,
+      totalsTop,
+      totalsBoxWidth,
+      82 + totals.length * 18,
+      14,
+    )
     .fillAndStroke("#f8f3ee", "#eadfd8");
 
   totals.forEach(([label, value], index) => {
@@ -1294,14 +1305,48 @@ const createOrder = async (req, res) => {
           .filter(Boolean),
       ),
     ];
+
+    if (productIds.length !== orderItems.length) {
+      return res.status(400).json({
+        success: false,
+        message: "Every order item must include a valid product",
+      });
+    }
+
     const orderedProducts = await Product.find({ _id: { $in: productIds } })
       .select(
-        "_id name price finalPrice discountprice images guideImage gstRate gst hsnCode",
+        "_id name price finalPrice discountprice images guideImage gstRate gst hsnCode insideStock",
       )
       .lean();
     const productById = new Map(
       orderedProducts.map((product) => [String(product._id), product]),
     );
+    const missingProductIds = productIds.filter(
+      (productId) => !productById.has(productId),
+    );
+
+    if (missingProductIds.length > 0) {
+      return res.status(400).json({
+        success: false,
+        message: "One or more products are unavailable",
+      });
+    }
+
+    const outOfStockProducts = orderedProducts.filter(
+      (product) => product.insideStock === false,
+    );
+
+    if (outOfStockProducts.length > 0) {
+      return res.status(400).json({
+        success: false,
+        message: `${outOfStockProducts
+          .map((product) => product.name || "Product")
+          .join(", ")} ${
+          outOfStockProducts.length === 1 ? "is" : "are"
+        } out of stock`,
+      });
+    }
+
     const normalizedOrderItems = orderItems.map((item) => {
       const productId = String(item?.product || item?.productId || "").trim();
       const productMeta = productById.get(productId) || {};
@@ -1554,13 +1599,11 @@ const updateOrderStatus = async (req, res) => {
       "_id fullName email phone",
     );
 
-    res
-      .status(200)
-      .json({
-        success: true,
-        message: "Order status updated",
-        order: populatedOrder,
-      });
+    res.status(200).json({
+      success: true,
+      message: "Order status updated",
+      order: populatedOrder,
+    });
   } catch (error) {
     res.status(500).json({
       success: false,
