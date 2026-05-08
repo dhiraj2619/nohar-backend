@@ -72,6 +72,47 @@ const getNotifications = async (req, res) => {
   }
 };
 
+const getUserNotifications = async (req, res) => {
+  try {
+    const userId = req.user?._id || req.user?.id;
+
+    if (!userId || !mongoose.Types.ObjectId.isValid(userId)) {
+      return res.status(400).json({
+        success: false,
+        message: "Valid user ID is required",
+      });
+    }
+
+    const notifications = await Notification.find({
+      status: { $in: ["sent", "partial"] },
+      $or: [
+        { audienceType: "all" },
+        {
+          audienceType: "selected",
+          recipients: userId,
+        },
+      ],
+    })
+      .select("title description image audienceType createdAt")
+      .sort({ createdAt: -1 })
+      .limit(50)
+      .lean();
+
+    return res.status(200).json({
+      success: true,
+      count: notifications.length,
+      data: notifications,
+    });
+  } catch (error) {
+    console.error("Error fetching user notifications:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch notifications",
+      error: error.message,
+    });
+  }
+};
+
 const deleteNotification = async (req, res) => {
   try {
     const { id } = req.params;
@@ -233,6 +274,7 @@ const createNotification = async (req, res) => {
 
 module.exports = {
   getNotifications,
+  getUserNotifications,
   createNotification,
   deleteNotification,
 };

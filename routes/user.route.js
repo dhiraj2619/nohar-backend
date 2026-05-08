@@ -7,6 +7,7 @@ const {
   clearFcmToken,
   sendOrderEmailSms,
 } = require("../controllers/user.controller");
+const { getUserNotifications } = require("../controllers/notification.controller");
 const { isAuth } = require("../middlewares/auth.middleware");
 
 const userRouter = require("express").Router();
@@ -16,6 +17,7 @@ userRouter.post("/verify-otp", verifyOTP);
 userRouter.post("/logout", logoutUser);
 userRouter.post("/complete-profile", isAuth, completeUserProfile);
 userRouter.post("/sendmailsms", isAuth, sendOrderEmailSms);
+userRouter.get("/notifications", isAuth, getUserNotifications);
 userRouter.post("/fcm-token", isAuth, saveFcmToken);
 userRouter.delete("/fcm-token", isAuth, clearFcmToken);
 
