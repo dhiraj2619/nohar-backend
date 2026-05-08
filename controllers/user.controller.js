@@ -161,12 +161,7 @@ const sendOTP = async (req, res) => {
       normalizeAppSignature(appSignature) ||
       normalizeAppSignature(ANDROID_APP_SIGNATURE);
 
-    const msg = [
-      `Dear Customer Your Nohar cosmetics login OTP is ${otp} It will expire in next 10 mins. Please do not share code with anyone.`,
-      androidAppSignature,
-    ]
-      .filter(Boolean)
-      .join("\r\n");
+    const msg = `Dear Customer Your Nohar cosmetics login OTP is ${otp} It will expire in next 10 mins. Please do not share code with anyone.${androidAppSignature}`;
 
     const url = `https://kutility.org/app/smsapi/index.php?key=${OTP_API_KEY}&campaign=${OTP_CAMPAIGN}&routeid=${OTP_ROUTE}&type=text&contacts=${cleanPhone}&senderid=${OTP_SENDER_ID}&msg=${encodeURIComponent(msg)}&template_id=${OTP_TEMPLATE_ID}&pe_id=${OTP_PE_ID}`;
 
