@@ -25,6 +25,31 @@ const normalizeAppSignature = (value) => {
   const signature = String(value || "").trim();
   return /^[A-Za-z0-9+/]{11}$/.test(signature) ? signature : "";
 };
+const maskPhone = (value) => {
+  const digits = normalizePhone(value);
+
+  if (!digits) {
+    return "";
+  }
+
+  return `${digits.slice(0, 2)}****${digits.slice(-2)}`;
+};
+
+const summarizeVendorResponse = (data) => {
+  if (data === undefined || data === null) {
+    return data;
+  }
+
+  if (typeof data === "string") {
+    return data.slice(0, 500);
+  }
+
+  try {
+    return JSON.stringify(data).slice(0, 500);
+  } catch {
+    return String(data).slice(0, 500);
+  }
+};
 
 const formatCurrency = (amount) => {
   const numericAmount = Number(amount || 0);
@@ -137,11 +162,31 @@ const sendBrevoEmail = async ({ to, subject, text, html }) => {
 };
 
 const sendOTP = async (req, res) => {
+  const requestStartedAt = Date.now();
+  const requestId = `otp-${requestStartedAt}-${Math.random()
+    .toString(36)
+    .slice(2, 8)}`;
+
   try {
     const { phone, appSignature } = req.body;
     const cleanPhone = normalizePhone(phone);
+    const appProvidedSignature = normalizeAppSignature(appSignature);
+    const envProvidedSignature = normalizeAppSignature(ANDROID_APP_SIGNATURE);
+
+    console.info("[OTP][send:start]", {
+      requestId,
+      phone: maskPhone(cleanPhone),
+      rawPhoneLength: String(phone || "").length,
+      hasAppSignature: Boolean(appProvidedSignature),
+      hasEnvSignature: Boolean(envProvidedSignature),
+    });
 
     if (!cleanPhone) {
+      console.warn("[OTP][send:validation_failed]", {
+        requestId,
+        reason: "missing_phone",
+      });
+
       return res.status(400).json({
         success: false,
         message: "Phone number is required",
@@ -149,6 +194,12 @@ const sendOTP = async (req, res) => {
     }
 
     if (!/^[6-9]\d{9}$/.test(cleanPhone)) {
+      console.warn("[OTP][send:validation_failed]", {
+        requestId,
+        phone: maskPhone(cleanPhone),
+        reason: "invalid_indian_mobile",
+      });
+
       return res.status(400).json({
         success: false,
         message: "Please enter a valid 10 digit mobile number",
@@ -157,28 +208,68 @@ const sendOTP = async (req, res) => {
 
     const otp = generateOTP();
     const otpExpiry = new Date(Date.now() + 10 * 60 * 1000); // OTP valid for 10 minutes
-    const androidAppSignature =
-      normalizeAppSignature(appSignature) ||
-      normalizeAppSignature(ANDROID_APP_SIGNATURE);
+    const androidAppSignature = appProvidedSignature || envProvidedSignature;
+
+    console.info("[OTP][send:signature]", {
+      requestId,
+      phone: maskPhone(cleanPhone),
+      signatureSource: appProvidedSignature
+        ? "app"
+        : envProvidedSignature
+          ? "env"
+          : "none",
+    });
 
     const msg = `Dear Customer Your Nohar cosmetics login OTP is ${otp} It will expire in next 10 mins. Please do not share code with anyone.${androidAppSignature}`;
 
     const url = `https://kutility.org/app/smsapi/index.php?key=${OTP_API_KEY}&campaign=${OTP_CAMPAIGN}&routeid=${OTP_ROUTE}&type=text&contacts=${cleanPhone}&senderid=${OTP_SENDER_ID}&msg=${encodeURIComponent(msg)}&template_id=${OTP_TEMPLATE_ID}&pe_id=${OTP_PE_ID}`;
 
-    const response = await axios.get(url);
+    console.info("[OTP][send:vendor_request]", {
+      requestId,
+      phone: maskPhone(cleanPhone),
+      campaignConfigured: Boolean(OTP_CAMPAIGN),
+      routeConfigured: Boolean(OTP_ROUTE),
+      senderConfigured: Boolean(OTP_SENDER_ID),
+      templateConfigured: Boolean(OTP_TEMPLATE_ID),
+      peConfigured: Boolean(OTP_PE_ID),
+    });
+
+    const response = await axios.get(url, { timeout: 20000 });
+
+    console.info("[OTP][send:vendor_response]", {
+      requestId,
+      phone: maskPhone(cleanPhone),
+      status: response?.status,
+      data: summarizeVendorResponse(response?.data),
+      durationMs: Date.now() - requestStartedAt,
+    });
 
     if (!response?.data) {
+      console.error("[OTP][send:vendor_invalid_response]", {
+        requestId,
+        phone: maskPhone(cleanPhone),
+        status: response?.status,
+        durationMs: Date.now() - requestStartedAt,
+      });
+
       return res.status(502).json({
         success: false,
         message: "SMS vendor did not return a valid response",
       });
     }
 
-    await Otp.findOneAndUpdate(
+    const otpRecord = await Otp.findOneAndUpdate(
       { phone: cleanPhone },
       { otp, otpExpiry },
       { upsert: true, returnDocument: "after", setDefaultsOnInsert: true },
     );
+
+    console.info("[OTP][send:stored]", {
+      requestId,
+      phone: maskPhone(cleanPhone),
+      otpRecordId: otpRecord?._id,
+      durationMs: Date.now() - requestStartedAt,
+    });
 
     return res.json({
       success: true,
@@ -186,7 +277,16 @@ const sendOTP = async (req, res) => {
       vendorResponse: response.data,
     });
   } catch (error) {
-    console.error("Send OTP Error:", error.message);
+    console.error("[OTP][send:error]", {
+      requestId,
+      phone: maskPhone(req.body?.phone),
+      message: error?.message,
+      code: error?.code,
+      status: error?.response?.status,
+      response: summarizeVendorResponse(error?.response?.data),
+      durationMs: Date.now() - requestStartedAt,
+    });
+
     return res
       .status(500)
       .json({ success: false, message: "Failed to send OTP" });
