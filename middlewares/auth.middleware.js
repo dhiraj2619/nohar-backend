@@ -26,7 +26,9 @@ const isAuth = async (req, res, next) => {
 
     const decoded = jwt.verify(token, JWT_SECRET);
 
-    const user = await User.findById(decoded.id).select("_id  email fullname");
+    const user = await User.findById(decoded.id).select(
+      "_id fullName email phone",
+    );
 
     if (!user) {
       return res.status(401).json({

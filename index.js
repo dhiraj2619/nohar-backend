@@ -26,7 +26,9 @@ const { paymentRouter } = require("./routes/payment.route");
 const orderRouter = require("./routes/order.route");
 const { notificationRouter } = require("./routes/notification.route");
 const { locationRouter } = require("./routes/location.route");
+const { leadRouter } = require("./routes/lead.route");
 const { initializeFirebase } = require("./services/notification.service");
+const { markStaleCartsAbandoned } = require("./services/lead.service");
 
 const app = express();
 const port = PORT;
@@ -68,6 +70,7 @@ app.use("/api/v1/shipping", shippingRouter);
 app.use("/api/v1/payment", paymentRouter);
 app.use("/api/v1/orders", orderRouter);
 app.use("/api/v1/locations", locationRouter);
+app.use("/api/v1/leads", leadRouter);
 
 // admin routes
 app.use("/api/v1/admin", adminRouter);
@@ -76,3 +79,14 @@ app.use("/api/v1/admin/notifications", notificationRouter);
 app.listen(port, () => {
   console.log(`server is running on http://localhost:${port}`);
 });
+
+setInterval(
+  () => {
+    markStaleCartsAbandoned(process.env.CART_ABANDON_MINUTES || 60).catch(
+      (error) => {
+        console.error("Abandoned cart sweep failed:", error.message);
+      },
+    );
+  },
+  Number(process.env.CART_ABANDON_SWEEP_MS || 15 * 60 * 1000),
+);

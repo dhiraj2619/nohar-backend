@@ -8,6 +8,7 @@ const ShippingInfo = require("../models/shippingInfo.model");
 const Product = require("../models/products.model");
 const AdminInfo = require("../models/adminInfo.model");
 const User = require("../models/users.model");
+const { markCartConverted } = require("../services/lead.service");
 const {
   MAIL_FROM,
   ORDER_OWNER_EMAIL,
@@ -1392,6 +1393,13 @@ const createOrder = async (req, res) => {
       order,
       customer,
       customerEmail: normalizedCustomerEmail || customer?.email,
+    });
+
+    markCartConverted({
+      userId,
+      orderId: order._id,
+    }).catch((error) => {
+      console.error("Cart lead conversion failed:", error.message);
     });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
