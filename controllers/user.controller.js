@@ -392,16 +392,15 @@ const completeUserProfile = async (req, res) => {
   try {
     const userId = req.user._id;
 
-    const { firstname, lastname, email } = req.body;
+    const { firstname, lastname, fullName: bodyFullName, email } = req.body;
+    const fullName = bodyFullName || `${firstname || ""} ${lastname || ""}`.trim();
 
-    if (!firstname || !lastname || !email) {
+    if (!fullName || !email) {
       return res.status(400).json({
         success: false,
-        message: "All fields are required",
+        message: "Full name and email are required",
       });
     }
-
-    const fullName = `${firstname} ${lastname}`.trim();
 
     const user = await User.findById(userId);
 
