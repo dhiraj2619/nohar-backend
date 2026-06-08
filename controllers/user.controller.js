@@ -16,6 +16,7 @@ const Otp = require("../models/otp.model");
 const User = require("../models/users.model");
 
 const generateOTP = () => Math.floor(100000 + Math.random() * 900000);
+const DEFAULT_OTP_APP_SIGNATURE = "jLC652FxiEr";
 const normalizeEmail = (value) => String(value || "").trim();
 const normalizePhone = (value) => {
   const digits = String(value || "").replace(/\D/g, "");
@@ -168,18 +169,17 @@ const sendOTP = async (req, res) => {
     .slice(2, 8)}`;
 
   try {
-    const { phone, appSignature, channel } = req.body;
+    const { phone, appSignature } = req.body;
     const cleanPhone = normalizePhone(phone);
-    const requestChannel = String(channel || "").trim().toLowerCase();
-    const isWebOtpRequest = requestChannel === "web";
     const appProvidedSignature = normalizeAppSignature(appSignature);
-    const envProvidedSignature = normalizeAppSignature(ANDROID_APP_SIGNATURE);
+    const envProvidedSignature = normalizeAppSignature(
+      ANDROID_APP_SIGNATURE || DEFAULT_OTP_APP_SIGNATURE,
+    );
 
     console.info("[OTP][send:start]", {
       requestId,
       phone: maskPhone(cleanPhone),
       rawPhoneLength: String(phone || "").length,
-      channel: requestChannel || "unknown",
       hasAppSignature: Boolean(appProvidedSignature),
       hasEnvSignature: Boolean(envProvidedSignature),
     });
@@ -211,7 +211,7 @@ const sendOTP = async (req, res) => {
 
     const otp = generateOTP();
     const otpExpiry = new Date(Date.now() + 10 * 60 * 1000); // OTP valid for 10 minutes
-    const androidAppSignature = appProvidedSignature;
+    const androidAppSignature = appProvidedSignature || envProvidedSignature;
 
     console.info("[OTP][send:signature]", {
       requestId,
@@ -219,7 +219,7 @@ const sendOTP = async (req, res) => {
       signatureSource: appProvidedSignature
         ? "app"
         : envProvidedSignature
-          ? "env_ignored_for_web"
+          ? "env"
           : "none",
     });
 
@@ -278,7 +278,6 @@ const sendOTP = async (req, res) => {
       success: true,
       message: "OTP sent successfully",
       vendorResponse: response.data,
-      debugOtp: isWebOtpRequest ? String(otp) : undefined,
     });
   } catch (error) {
     console.error("[OTP][send:error]", {
@@ -397,7 +396,8 @@ const completeUserProfile = async (req, res) => {
     const userId = req.user._id;
 
     const { firstname, lastname, fullName: bodyFullName, email } = req.body;
-    const fullName = bodyFullName || `${firstname || ""} ${lastname || ""}`.trim();
+    const fullName =
+      bodyFullName || `${firstname || ""} ${lastname || ""}`.trim();
 
     if (!fullName || !email) {
       return res.status(400).json({
