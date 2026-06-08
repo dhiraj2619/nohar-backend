@@ -43,6 +43,7 @@ const createOrder = async (req, res) => {
 
     return res.status(201).json({
       success: true,
+      key: process.env.RAZORPAY_KEY_ID,
       data: order,
     });
   } catch (error) {

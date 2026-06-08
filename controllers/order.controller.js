@@ -35,6 +35,7 @@ const DEFAULT_STORE_DETAILS = {
   gstNumber: "27CAAPB9203J2ZX",
   authorizedSignatory: "Nohar Cosmetics",
   allowCOD: true,
+  allowOnline: true,
   allowPartial: false,
   partialPaymentType: "PERCENT",
   partialPaymentValue: 0,
@@ -274,6 +275,10 @@ const getStoreDetails = async () => {
       settings?.allowCOD !== undefined
         ? Boolean(settings.allowCOD)
         : DEFAULT_STORE_DETAILS.allowCOD,
+    allowOnline:
+      settings?.allowOnline !== undefined
+        ? Boolean(settings.allowOnline)
+        : DEFAULT_STORE_DETAILS.allowOnline,
     allowPartial:
       settings?.allowPartial !== undefined
         ? Boolean(settings.allowPartial)
@@ -1110,6 +1115,7 @@ const createOrder = async (req, res) => {
     const {
       userId,
       shippingId,
+      addressId,
       orderItems,
       totalPrice,
       paymentId,
@@ -1117,11 +1123,18 @@ const createOrder = async (req, res) => {
       partialPercent,
       amountPaid,
       customerEmail,
+      bookingSource,
     } = req.body;
 
     const normalizedPaymentMode = String(paymentMode || "")
       .trim()
       .toUpperCase();
+    const normalizedBookingSource =
+      String(bookingSource || "")
+        .trim()
+        .toLowerCase() === "website"
+        ? "website"
+        : "app";
     const normalizedCustomerEmail = String(customerEmail || "")
       .trim()
       .toLowerCase();
@@ -1157,6 +1170,17 @@ const createOrder = async (req, res) => {
       return res.status(400).json({
         success: false,
         message: "Cash on delivery is currently disabled",
+      });
+    }
+
+    if (
+      !storeDetails.allowOnline &&
+      (normalizedPaymentMode === "FULL" ||
+        normalizedPaymentMode === "PARTIAL_COD")
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "Online payment is currently disabled",
       });
     }
 
@@ -1203,9 +1227,10 @@ const createOrder = async (req, res) => {
         .json({ success: false, message: "Shipping address not found" });
     }
 
-    const selectedAddress =
-      shippingInfo.addresses.find((add) => add.isDefault) ||
-      shippingInfo.addresses[0];
+    const selectedAddress = addressId
+      ? shippingInfo.addresses.find((add) => add._id.toString() === addressId)
+      : shippingInfo.addresses.find((add) => add.isDefault) ||
+        shippingInfo.addresses[0];
 
     if (!selectedAddress) {
       return res
@@ -1256,7 +1281,9 @@ const createOrder = async (req, res) => {
         );
       } else {
         const percentValue =
-          configuredPartialValue ?? normalizeNumber(partialPercent ?? 20);
+          configuredPartialValue && configuredPartialValue > 0
+            ? configuredPartialValue
+            : normalizeNumber(partialPercent ?? 20);
 
         if (!percentValue || percentValue <= 0 || percentValue >= 100) {
           return res.status(400).json({
@@ -1365,6 +1392,7 @@ const createOrder = async (req, res) => {
       user: userId,
       shippingInfo: selectedAddress,
       orderItems: normalizedOrderItems,
+      bookingSource: normalizedBookingSource,
       totalPrice: normalizedTotal,
       orderStatus: "ORDER_PLACED",
       payment: normalizedPaymentId,

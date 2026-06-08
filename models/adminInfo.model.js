@@ -45,6 +45,10 @@ const adminInfoSchema = new mongoose.Schema(
       type: Boolean,
       default: true,
     },
+    allowOnline: {
+      type: Boolean,
+      default: true,
+    },
     allowPartial: {
       type: Boolean,
       default: false,

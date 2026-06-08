@@ -170,8 +170,64 @@ const updateAddress = async (req, res) => {
   }
 };
 
+const deleteAddress = async (req, res) => {
+  try {
+    const { addressId } = req.params;
+    const finalUserId = req.user?._id || req.user?.id;
+
+    if (!finalUserId || !isValidObjectId(finalUserId) || !addressId) {
+      return res.status(400).json({
+        success: false,
+        message: "Valid userId and addressId are required",
+      });
+    }
+
+    const shippingInfo = await ShippingInfo.findOne({ user: finalUserId });
+
+    if (!shippingInfo) {
+      return res.status(404).json({
+        success: false,
+        message: "Shipping info not found",
+      });
+    }
+
+    const addressIndex = shippingInfo.addresses.findIndex(
+      (address) => address._id.toString() === addressId,
+    );
+
+    if (addressIndex === -1) {
+      return res.status(404).json({
+        success: false,
+        message: "Address not found",
+      });
+    }
+
+    const deletedAddress = shippingInfo.addresses[addressIndex];
+    shippingInfo.addresses.splice(addressIndex, 1);
+
+    if (deletedAddress.isDefault && shippingInfo.addresses.length) {
+      shippingInfo.addresses[0].isDefault = true;
+    }
+
+    await shippingInfo.save();
+
+    return res.status(200).json({
+      success: true,
+      message: "Address deleted successfully",
+      shippingInfo,
+    });
+  } catch (error) {
+    console.error("Delete address error:", error.message);
+    return res.status(500).json({
+      success: false,
+      message: "Server error",
+    });
+  }
+};
+
 module.exports = {
   addOrUpdateShippingInfo,
+  deleteAddress,
   getShippingInfo,
   updateAddress,
 };

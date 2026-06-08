@@ -94,6 +94,11 @@ const orderSchema = new mongoose.Schema(
       type: [orderItemSchema],
       required: true,
     },
+    bookingSource: {
+      type: String,
+      enum: ["website", "app"],
+      default: "app",
+    },
     payment: {
       type: mongoose.Schema.ObjectId,
       ref: "payment",

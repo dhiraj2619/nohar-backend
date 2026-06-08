@@ -54,6 +54,8 @@ const getOrCreateSettings = async () => {
 const buildPublicSettingsPayload = (settings) => ({
   allowCOD:
     settings?.allowCOD !== undefined ? Boolean(settings.allowCOD) : true,
+  allowOnline:
+    settings?.allowOnline !== undefined ? Boolean(settings.allowOnline) : true,
   allowPartial:
     settings?.allowPartial !== undefined ? Boolean(settings.allowPartial) : false,
   partialPaymentType:
@@ -137,6 +139,7 @@ const updateSettings = async (req, res) => {
       maintenanceMode,
       allowCOD,
       allowCod,
+      allowOnline,
       allowPartial,
       partialPaymentType,
       partialPaymentValue,
@@ -162,6 +165,9 @@ const updateSettings = async (req, res) => {
         allowCOD !== undefined ? allowCOD : allowCod,
         true,
       );
+    }
+    if (allowOnline !== undefined) {
+      settings.allowOnline = toBoolean(allowOnline, true);
     }
     if (allowPartial !== undefined) {
       settings.allowPartial = toBoolean(allowPartial, false);

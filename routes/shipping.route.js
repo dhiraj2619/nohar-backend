@@ -1,5 +1,6 @@
 const {
   addOrUpdateShippingInfo,
+  deleteAddress,
   getShippingInfo,
   updateAddress,
 } = require("../controllers/shipping.controller");
@@ -11,5 +12,6 @@ shippingRouter.post("/add", isAuth, addOrUpdateShippingInfo);
 shippingRouter.get("/me", isAuth, getShippingInfo);
 shippingRouter.get("/get-by-user/:id", getShippingInfo);
 shippingRouter.put("/update-address", isAuth, updateAddress);
+shippingRouter.delete("/address/:addressId", isAuth, deleteAddress);
 
 module.exports = { shippingRouter };
