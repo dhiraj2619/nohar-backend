@@ -168,8 +168,10 @@ const sendOTP = async (req, res) => {
     .slice(2, 8)}`;
 
   try {
-    const { phone, appSignature } = req.body;
+    const { phone, appSignature, channel } = req.body;
     const cleanPhone = normalizePhone(phone);
+    const requestChannel = String(channel || "").trim().toLowerCase();
+    const isWebOtpRequest = requestChannel === "web";
     const appProvidedSignature = normalizeAppSignature(appSignature);
     const envProvidedSignature = normalizeAppSignature(ANDROID_APP_SIGNATURE);
 
@@ -177,6 +179,7 @@ const sendOTP = async (req, res) => {
       requestId,
       phone: maskPhone(cleanPhone),
       rawPhoneLength: String(phone || "").length,
+      channel: requestChannel || "unknown",
       hasAppSignature: Boolean(appProvidedSignature),
       hasEnvSignature: Boolean(envProvidedSignature),
     });
@@ -275,6 +278,7 @@ const sendOTP = async (req, res) => {
       success: true,
       message: "OTP sent successfully",
       vendorResponse: response.data,
+      debugOtp: isWebOtpRequest ? String(otp) : undefined,
     });
   } catch (error) {
     console.error("[OTP][send:error]", {
