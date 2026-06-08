@@ -16,6 +16,7 @@ const Otp = require("../models/otp.model");
 const User = require("../models/users.model");
 
 const generateOTP = () => Math.floor(100000 + Math.random() * 900000);
+const DEFAULT_ANDROID_APP_SIGNATURE = "pWKH+0ytBW/";
 const normalizeEmail = (value) => String(value || "").trim();
 const normalizePhone = (value) => {
   const digits = String(value || "").replace(/\D/g, "");
@@ -171,7 +172,9 @@ const sendOTP = async (req, res) => {
     const { phone, appSignature } = req.body;
     const cleanPhone = normalizePhone(phone);
     const appProvidedSignature = normalizeAppSignature(appSignature);
-    const envProvidedSignature = normalizeAppSignature(ANDROID_APP_SIGNATURE);
+    const envProvidedSignature = normalizeAppSignature(
+      ANDROID_APP_SIGNATURE || DEFAULT_ANDROID_APP_SIGNATURE,
+    );
 
     console.info("[OTP][send:start]", {
       requestId,
