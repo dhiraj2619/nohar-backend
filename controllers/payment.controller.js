@@ -254,7 +254,15 @@ const getPayments = async (req, res) => {
 
     const payments = await Payment.find(filter)
       .populate("user", "fullName phone email")
-      .populate("order", "orderNumber totalPrice orderStatus paymentStatus")
+      .populate({
+        path: "order",
+        select:
+          "orderNumber totalPrice orderStatus paymentStatus bookingSource user",
+        populate: {
+          path: "user",
+          select: "fullName phone email",
+        },
+      })
       .sort({ createdAt: -1 })
       .limit(500);
 
@@ -392,7 +400,11 @@ const syncRazorpayPayments = async (req, res) => {
             { razorpay_payment_id: item.id },
             { razorpay_order_id: razorpayOrderId },
           ],
-        }).select("_id");
+        }).select("_id source user customerName customerEmail customerContact");
+        const sourceToSave =
+          existingPayment?.source && existingPayment.source !== "unknown"
+            ? existingPayment.source
+            : "unknown";
 
         await Payment.findOneAndUpdate(
           existingPayment
@@ -410,10 +422,13 @@ const syncRazorpayPayments = async (req, res) => {
                 razorpayOrder?.receipt ||
                 "",
               status,
-              customerName: customer.customerName,
-              customerEmail: customer.customerEmail,
-              customerContact: customer.customerContact,
-              source: "unknown",
+              customerName:
+                existingPayment?.customerName || customer.customerName,
+              customerEmail:
+                existingPayment?.customerEmail || customer.customerEmail,
+              customerContact:
+                existingPayment?.customerContact || customer.customerContact,
+              source: sourceToSave,
               failureReason: status === "FAILED" ? item.error_reason || "" : "",
               failureCode: status === "FAILED" ? item.error_code || "" : "",
               failureDescription:
