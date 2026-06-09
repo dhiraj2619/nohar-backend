@@ -38,6 +38,21 @@ const PaymentModelSchema = new mongoose.Schema(
       enum: ["website", "app", "unknown"],
       default: "unknown",
     },
+    customerName: {
+      type: String,
+      default: "",
+      trim: true,
+    },
+    customerEmail: {
+      type: String,
+      default: "",
+      trim: true,
+    },
+    customerContact: {
+      type: String,
+      default: "",
+      trim: true,
+    },
     user: {
       type: mongoose.Schema.ObjectId,
       ref: "User",

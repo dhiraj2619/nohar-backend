@@ -244,6 +244,9 @@ const getPayments = async (req, res) => {
         { razorpay_order_id: { $regex: pattern, $options: "i" } },
         { razorpay_payment_id: { $regex: pattern, $options: "i" } },
         { receipt: { $regex: pattern, $options: "i" } },
+        { customerName: { $regex: pattern, $options: "i" } },
+        { customerEmail: { $regex: pattern, $options: "i" } },
+        { customerContact: { $regex: pattern, $options: "i" } },
         { failureReason: { $regex: pattern, $options: "i" } },
         { failureCode: { $regex: pattern, $options: "i" } },
       ];
@@ -280,10 +283,51 @@ const parseSyncDate = (value, fallbackDate) => {
 const mapRazorpayPaymentStatus = (status) => {
   const normalizedStatus = String(status || "").toLowerCase();
 
-  if (normalizedStatus === "captured") return "SUCCESS";
+  if (["authorized", "captured"].includes(normalizedStatus)) return "SUCCESS";
   if (normalizedStatus === "failed") return "FAILED";
 
   return "CREATED";
+};
+
+const getFirstValue = (...values) =>
+  values.find((value) => value !== undefined && value !== null && value !== "");
+
+const getRazorpayAmount = (payment, order) =>
+  Number(
+    getFirstValue(
+      payment?.amount,
+      payment?.base_amount,
+      order?.amount_paid,
+      order?.amount,
+      0,
+    ),
+  ) / 100;
+
+const getRazorpayCustomer = (payment, order) => {
+  const notes = payment?.notes || order?.notes || {};
+
+  return {
+    customerName: String(
+      getFirstValue(
+        notes.customerName,
+        notes.customer_name,
+        notes.name,
+        payment?.card?.name,
+        "",
+      ),
+    ),
+    customerEmail: String(getFirstValue(payment?.email, notes.email, "")),
+    customerContact: String(
+      getFirstValue(
+        payment?.contact,
+        notes.phone,
+        notes.mobile,
+        notes.contact,
+        notes.customerContact,
+        "",
+      ),
+    ),
+  };
 };
 
 const syncRazorpayPayments = async (req, res) => {
@@ -328,6 +372,21 @@ const syncRazorpayPayments = async (req, res) => {
 
         const razorpayOrderId = item.order_id || `payment_only_${item.id}`;
         const status = mapRazorpayPaymentStatus(item.status);
+        let razorpayOrder = null;
+
+        if (item.order_id) {
+          try {
+            razorpayOrder = await razorpayInstance.orders.fetch(item.order_id);
+          } catch (orderFetchError) {
+            console.warn(
+              "Unable to fetch Razorpay order while syncing payment:",
+              item.order_id,
+              orderFetchError?.message || orderFetchError,
+            );
+          }
+        }
+
+        const customer = getRazorpayCustomer(item, razorpayOrder);
         const existingPayment = await Payment.findOne({
           $or: [
             { razorpay_payment_id: item.id },
@@ -343,10 +402,17 @@ const syncRazorpayPayments = async (req, res) => {
             $set: {
               razorpay_order_id: razorpayOrderId,
               razorpay_payment_id: item.id,
-              amount: Number(item.amount || 0) / 100,
+              amount: getRazorpayAmount(item, razorpayOrder),
               currency: item.currency || "INR",
-              receipt: item.notes?.receipt || item.receipt || "",
+              receipt:
+                item.notes?.receipt ||
+                item.receipt ||
+                razorpayOrder?.receipt ||
+                "",
               status,
+              customerName: customer.customerName,
+              customerEmail: customer.customerEmail,
+              customerContact: customer.customerContact,
               source: "unknown",
               failureReason: status === "FAILED" ? item.error_reason || "" : "",
               failureCode: status === "FAILED" ? item.error_code || "" : "",
