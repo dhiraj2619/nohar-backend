@@ -2,6 +2,7 @@ const Razorpay = require("razorpay");
 const crypto = require("crypto");
 const mongoose = require("mongoose");
 const Payment = require("../models/payment.model");
+const User = require("../models/users.model");
 
 const getRazorpayInstance = () => {
   if (!process.env.RAZORPAY_KEY_ID || !process.env.RAZORPAY_SECRET) {
@@ -263,7 +264,7 @@ const getPayments = async (req, res) => {
           select: "fullName phone email",
         },
       })
-      .sort({ createdAt: -1 })
+      .sort({ date: -1, createdAt: -1 })
       .limit(500);
 
     return res.status(200).json({
@@ -297,8 +298,21 @@ const mapRazorpayPaymentStatus = (status) => {
   return "CREATED";
 };
 
-const getFirstValue = (...values) =>
-  values.find((value) => value !== undefined && value !== null && value !== "");
+const isMeaningfulValue = (value) => {
+  if (value === undefined || value === null) return false;
+
+  const normalizedValue = String(value).trim().toLowerCase();
+
+  return Boolean(normalizedValue) && !["undefined", "null", "nan"].includes(normalizedValue);
+};
+
+const getFirstValue = (...values) => values.find(isMeaningfulValue);
+
+const normalizePhoneForLookup = (phone) => {
+  const digits = String(phone || "").replace(/\D/g, "");
+
+  return digits.length > 10 ? digits.slice(-10) : digits;
+};
 
 const getRazorpayAmount = (payment, order) =>
   Number(
@@ -337,6 +351,23 @@ const getRazorpayCustomer = (payment, order) => {
     ),
   };
 };
+
+const findUserFromRazorpayCustomer = async ({ customerContact, customerEmail }) => {
+  const orFilters = [];
+  const phone = normalizePhoneForLookup(customerContact);
+
+  if (phone.length === 10) orFilters.push({ phone });
+  if (isMeaningfulValue(customerEmail)) {
+    orFilters.push({ email: String(customerEmail).trim().toLowerCase() });
+  }
+
+  if (!orFilters.length) return null;
+
+  return User.findOne({ $or: orFilters }).select("_id fullName phone email");
+};
+
+const keepExistingOrUseNew = (existingValue, nextValue) =>
+  isMeaningfulValue(existingValue) ? existingValue : nextValue;
 
 const syncRazorpayPayments = async (req, res) => {
   try {
@@ -405,6 +436,8 @@ const syncRazorpayPayments = async (req, res) => {
           existingPayment?.source && existingPayment.source !== "unknown"
             ? existingPayment.source
             : "unknown";
+        const matchedUser =
+          existingPayment?.user || (await findUserFromRazorpayCustomer(customer));
 
         await Payment.findOneAndUpdate(
           existingPayment
@@ -423,12 +456,13 @@ const syncRazorpayPayments = async (req, res) => {
                 "",
               status,
               customerName:
-                existingPayment?.customerName || customer.customerName,
+                keepExistingOrUseNew(existingPayment?.customerName, customer.customerName),
               customerEmail:
-                existingPayment?.customerEmail || customer.customerEmail,
+                keepExistingOrUseNew(existingPayment?.customerEmail, customer.customerEmail),
               customerContact:
-                existingPayment?.customerContact || customer.customerContact,
+                keepExistingOrUseNew(existingPayment?.customerContact, customer.customerContact),
               source: sourceToSave,
+              user: matchedUser?._id || existingPayment?.user || null,
               failureReason: status === "FAILED" ? item.error_reason || "" : "",
               failureCode: status === "FAILED" ? item.error_code || "" : "",
               failureDescription:
