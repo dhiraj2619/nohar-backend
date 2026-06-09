@@ -21,6 +21,10 @@ const {
   updateQuoteSlider,
 } = require("../controllers/quoteslider.controller");
 const {
+  getPayments,
+  syncRazorpayPayments,
+} = require("../controllers/payment.controller");
+const {
   advanceOrderPhase,
   getAdminOrderDetails,
   getOrders,
@@ -36,6 +40,8 @@ adminRouter.post("/login", loginAdmin);
 adminRouter.get("/owner", getOwnerAdmin);
 adminRouter.get("/customers", isAdminAuth, getCustomers);
 adminRouter.get("/orders", isAdminAuth, getOrders);
+adminRouter.get("/payments", isAdminAuth, getPayments);
+adminRouter.post("/payments/sync-razorpay", isAdminAuth, syncRazorpayPayments);
 adminRouter.get("/orders/:orderId", isAdminAuth, getAdminOrderDetails);
 adminRouter.patch("/orders/:orderId/next-phase", isAdminAuth, advanceOrderPhase);
 adminRouter.patch("/orders/:orderId/status", isAdminAuth, updateOrderStatus);

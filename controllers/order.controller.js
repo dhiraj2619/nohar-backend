@@ -4,6 +4,7 @@ const path = require("path");
 const PDFDocument = require("pdfkit");
 const axios = require("axios");
 const Order = require("../models/order.model");
+const Payment = require("../models/payment.model");
 const ShippingInfo = require("../models/shippingInfo.model");
 const Product = require("../models/products.model");
 const AdminInfo = require("../models/adminInfo.model");
@@ -1409,6 +1410,17 @@ const createOrder = async (req, res) => {
     }
 
     await order.save();
+
+    if (normalizedPaymentId) {
+      await Payment.findByIdAndUpdate(normalizedPaymentId, {
+        $set: {
+          order: order._id,
+          status: "SUCCESS",
+        },
+      }).catch((error) => {
+        console.error("Payment order link failed:", error.message);
+      });
+    }
 
     res.status(201).json({
       success: true,
