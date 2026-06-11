@@ -147,7 +147,7 @@ const getLeads = async (req, res) => {
     const [leads, total] = await Promise.all([
       Lead.find(filter)
         .select(
-          "leadType contact customerName lastUpdatedCartOn orderValue enquiryCreatedOn enquiry source createdAt updatedAt",
+          "leadType contact customerName lastUpdatedCartOn orderValue cartItems enquiryCreatedOn enquiry source createdAt updatedAt",
         )
         .sort({ [sortField]: -1, updatedAt: -1 })
         .skip(skip)

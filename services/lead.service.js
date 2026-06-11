@@ -14,10 +14,59 @@ const normalizeSource = (value) => {
 const getCustomerName = (user, fallback = {}) =>
   user?.fullName || user?.name || fallback.customerName || fallback.fullName || "";
 
+const getItemProduct = (item = {}) =>
+  item.product || item.productId || item._id || item.id || null;
+
+const getItemName = (item = {}) =>
+  item.name ||
+  item.productName ||
+  item.title ||
+  item.product?.name ||
+  item.productId?.name ||
+  "";
+
+const getItemImage = (item = {}) => {
+  const image =
+    item.image ||
+    item.thumbnail ||
+    item.productImage ||
+    item.product?.image ||
+    item.product?.images?.[0] ||
+    item.productId?.image ||
+    item.productId?.images?.[0];
+
+  if (!image) return "";
+
+  return typeof image === "string" ? image : image.url || "";
+};
+
+const getItemPrice = (item = {}) => {
+  const price = Number(item?.price || item?.finalPrice || item?.discountprice || 0);
+
+  return Number.isNaN(price) ? 0 : price;
+};
+
+const getItemQuantity = (item = {}) => {
+  const quantity = Number(item?.quantity || item?.qty || 1);
+
+  return Number.isNaN(quantity) ? 1 : quantity;
+};
+
+const getCartItemSnapshots = (items = []) =>
+  (Array.isArray(items) ? items : [])
+    .map((item) => ({
+      product: getItemProduct(item),
+      name: getItemName(item),
+      image: getItemImage(item),
+      quantity: getItemQuantity(item),
+      price: getItemPrice(item),
+    }))
+    .filter((item) => item.name || item.product || item.price > 0);
+
 const getOrderValue = (items = []) =>
   (Array.isArray(items) ? items : []).reduce((total, item) => {
-    const price = Number(item?.price || item?.finalPrice || item?.discountprice || 0);
-    const quantity = Number(item?.quantity || item?.qty || 1);
+    const price = getItemPrice(item);
+    const quantity = getItemQuantity(item);
 
     if (Number.isNaN(price) || Number.isNaN(quantity)) {
       return total;
@@ -28,6 +77,7 @@ const getOrderValue = (items = []) =>
 
 const syncUserCartLead = async ({ user, items, source = "unknown" }) => {
   const orderValue = Number(getOrderValue(items).toFixed(2));
+  const cartItems = getCartItemSnapshots(items);
 
   await Lead.deleteMany({
     user: user._id,
@@ -54,6 +104,7 @@ const syncUserCartLead = async ({ user, items, source = "unknown" }) => {
         customerName: getCustomerName(user),
         lastUpdatedCartOn: new Date(),
         orderValue,
+        cartItems,
         source: normalizeSource(source),
       },
     },
@@ -90,6 +141,7 @@ const markStaleCartsAbandoned = async (inactiveMinutes = 60) => {
             customerName: lead.customerName,
             lastUpdatedCartOn: lead.lastUpdatedCartOn,
             orderValue: lead.orderValue,
+            cartItems: lead.cartItems,
             source: lead.source,
           },
         },

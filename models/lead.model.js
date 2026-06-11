@@ -1,5 +1,35 @@
 const mongoose = require("mongoose");
 
+const cartItemSnapshotSchema = new mongoose.Schema(
+  {
+    product: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Product",
+    },
+    name: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+    image: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+    quantity: {
+      type: Number,
+      default: 1,
+      min: 0,
+    },
+    price: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+  },
+  { _id: false },
+);
+
 const leadSchema = new mongoose.Schema(
   {
     leadType: {
@@ -37,6 +67,10 @@ const leadSchema = new mongoose.Schema(
       type: Number,
       default: 0,
       min: 0,
+    },
+    cartItems: {
+      type: [cartItemSnapshotSchema],
+      default: [],
     },
     enquiryCreatedOn: {
       type: Date,
