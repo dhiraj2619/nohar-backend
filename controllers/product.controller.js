@@ -116,7 +116,68 @@ const normalizeProductPersistenceFields = (product) => ({
     product.insideStock !== undefined ? Boolean(product.insideStock) : true,
   isMostBuy:
     product.isMostBuy !== undefined ? Boolean(product.isMostBuy) : false,
+  seo: normalizeSeoFields(product.seo),
+  socialShare: normalizeSocialShareFields(product.socialShare),
 });
+
+const normalizeSeoFields = (seo = {}) => ({
+  titleTag: typeof seo.titleTag === "string" ? seo.titleTag.trim() : "",
+  metaDescription:
+    typeof seo.metaDescription === "string" ? seo.metaDescription.trim() : "",
+  keywords: typeof seo.keywords === "string" ? seo.keywords.trim() : "",
+  canonicalUrl:
+    typeof seo.canonicalUrl === "string" ? seo.canonicalUrl.trim() : "",
+  metaRobots:
+    typeof seo.metaRobots === "string" && seo.metaRobots.trim()
+      ? seo.metaRobots.trim()
+      : "index, follow",
+});
+
+const normalizeSocialShareFields = (socialShare = {}) => ({
+  ogTitle: typeof socialShare.ogTitle === "string" ? socialShare.ogTitle.trim() : "",
+  ogDescription:
+    typeof socialShare.ogDescription === "string"
+      ? socialShare.ogDescription.trim()
+      : "",
+  ogImageUrl:
+    typeof socialShare.ogImageUrl === "string" ? socialShare.ogImageUrl.trim() : "",
+  ogType:
+    typeof socialShare.ogType === "string" && socialShare.ogType.trim()
+      ? socialShare.ogType.trim()
+      : "product",
+  twitterTitle:
+    typeof socialShare.twitterTitle === "string"
+      ? socialShare.twitterTitle.trim()
+      : "",
+  twitterDescription:
+    typeof socialShare.twitterDescription === "string"
+      ? socialShare.twitterDescription.trim()
+      : "",
+  twitterImageUrl:
+    typeof socialShare.twitterImageUrl === "string"
+      ? socialShare.twitterImageUrl.trim()
+      : "",
+});
+
+const getProductSeoFromBody = (body = {}) =>
+  normalizeSeoFields({
+    titleTag: body.seoTitle ?? body.titleTag,
+    metaDescription: body.seoDescription ?? body.metaDescription,
+    keywords: body.seoKeywords ?? body.keywords,
+    canonicalUrl: body.seoCanonicalUrl ?? body.canonicalUrl,
+    metaRobots: body.seoRobots ?? body.metaRobots,
+  });
+
+const getProductSocialShareFromBody = (body = {}) =>
+  normalizeSocialShareFields({
+    ogTitle: body.ogTitle,
+    ogDescription: body.ogDescription,
+    ogImageUrl: body.ogImageUrl,
+    ogType: body.ogType,
+    twitterTitle: body.twitterTitle,
+    twitterDescription: body.twitterDescription,
+    twitterImageUrl: body.twitterImageUrl,
+  });
 
 const applyProductDefaults = (product) => {
   const legacyGstRate = product.get("gst");
@@ -283,6 +344,8 @@ const createProduct = async (req, res) => {
       insideStock:
         insideStock !== undefined ? toBoolean(insideStock) : true,
       isMostBuy: toBoolean(isMostBuy),
+      seo: getProductSeoFromBody(req.body),
+      socialShare: getProductSocialShareFromBody(req.body),
     });
 
     return res.status(201).json({
@@ -543,6 +606,62 @@ const updateProduct = async (req, res) => {
     if (insideStock !== undefined)
       product.insideStock = toBoolean(insideStock);
     if (isMostBuy !== undefined) product.isMostBuy = toBoolean(isMostBuy);
+    product.seo = getProductSeoFromBody({
+      ...product.seo?.toObject?.(),
+      ...product.seo,
+      ...req.body,
+      seoTitle:
+        req.body.seoTitle !== undefined
+          ? req.body.seoTitle
+          : product.seo?.titleTag,
+      seoDescription:
+        req.body.seoDescription !== undefined
+          ? req.body.seoDescription
+          : product.seo?.metaDescription,
+      seoKeywords:
+        req.body.seoKeywords !== undefined
+          ? req.body.seoKeywords
+          : product.seo?.keywords,
+      seoCanonicalUrl:
+        req.body.seoCanonicalUrl !== undefined
+          ? req.body.seoCanonicalUrl
+          : product.seo?.canonicalUrl,
+      seoRobots:
+        req.body.seoRobots !== undefined
+          ? req.body.seoRobots
+          : product.seo?.metaRobots,
+    });
+    product.socialShare = getProductSocialShareFromBody({
+      ...product.socialShare?.toObject?.(),
+      ...product.socialShare,
+      ...req.body,
+      ogTitle:
+        req.body.ogTitle !== undefined
+          ? req.body.ogTitle
+          : product.socialShare?.ogTitle,
+      ogDescription:
+        req.body.ogDescription !== undefined
+          ? req.body.ogDescription
+          : product.socialShare?.ogDescription,
+      ogImageUrl:
+        req.body.ogImageUrl !== undefined
+          ? req.body.ogImageUrl
+          : product.socialShare?.ogImageUrl,
+      ogType:
+        req.body.ogType !== undefined ? req.body.ogType : product.socialShare?.ogType,
+      twitterTitle:
+        req.body.twitterTitle !== undefined
+          ? req.body.twitterTitle
+          : product.socialShare?.twitterTitle,
+      twitterDescription:
+        req.body.twitterDescription !== undefined
+          ? req.body.twitterDescription
+          : product.socialShare?.twitterDescription,
+      twitterImageUrl:
+        req.body.twitterImageUrl !== undefined
+          ? req.body.twitterImageUrl
+          : product.socialShare?.twitterImageUrl,
+    });
 
     applyProductDefaults(product);
 

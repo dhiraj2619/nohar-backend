@@ -141,6 +141,70 @@ const productSchema = new mongoose.Schema(
       default: false,
       index: true,
     },
+    seo: {
+      titleTag: {
+        type: String,
+        default: "",
+        trim: true,
+      },
+      metaDescription: {
+        type: String,
+        default: "",
+        trim: true,
+      },
+      keywords: {
+        type: String,
+        default: "",
+        trim: true,
+      },
+      canonicalUrl: {
+        type: String,
+        default: "",
+        trim: true,
+      },
+      metaRobots: {
+        type: String,
+        default: "index, follow",
+        trim: true,
+      },
+    },
+    socialShare: {
+      ogTitle: {
+        type: String,
+        default: "",
+        trim: true,
+      },
+      ogDescription: {
+        type: String,
+        default: "",
+        trim: true,
+      },
+      ogImageUrl: {
+        type: String,
+        default: "",
+        trim: true,
+      },
+      ogType: {
+        type: String,
+        default: "product",
+        trim: true,
+      },
+      twitterTitle: {
+        type: String,
+        default: "",
+        trim: true,
+      },
+      twitterDescription: {
+        type: String,
+        default: "",
+        trim: true,
+      },
+      twitterImageUrl: {
+        type: String,
+        default: "",
+        trim: true,
+      },
+    },
   },
   { timestamps: true },
 );
