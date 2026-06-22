@@ -4,6 +4,8 @@ const Notification = require("../models/notification.model");
 const User = require("../models/users.model");
 const { sendPushToUsers } = require("../services/notification.service");
 
+const NOTIFICATION_TTL_MS = 48 * 60 * 60 * 1000;
+
 const parseArrayField = (value, defaultValue = []) => {
   if (value === undefined || value === null || value === "") {
     return defaultValue;
@@ -51,9 +53,45 @@ const pushTokenQuery = {
   $regex: /\S/,
 };
 
+const getNotificationExpiryCutoff = () =>
+  new Date(Date.now() - NOTIFICATION_TTL_MS);
+
+const purgeExpiredNotifications = async () => {
+  const cutoff = getNotificationExpiryCutoff();
+
+  const expiredNotifications = await Notification.find({
+    createdAt: { $lt: cutoff },
+  }).select("image.public_id");
+
+  if (!expiredNotifications.length) {
+    return { deletedCount: 0 };
+  }
+
+  await Promise.all(
+    expiredNotifications.map(async notification => {
+      if (notification.image?.public_id) {
+        await Cloudinary.v2.uploader.destroy(notification.image.public_id);
+      }
+    }),
+  );
+
+  const deleteResult = await Notification.deleteMany({
+    createdAt: { $lt: cutoff },
+  });
+
+  return {
+    deletedCount: deleteResult?.deletedCount || 0,
+  };
+};
+
 const getNotifications = async (req, res) => {
   try {
-    const notifications = await Notification.find()
+    await purgeExpiredNotifications();
+    const cutoff = getNotificationExpiryCutoff();
+
+    const notifications = await Notification.find({
+      createdAt: { $gte: cutoff },
+    })
       .populate("recipients", "fullName phone email")
       .sort({ createdAt: -1 });
 
@@ -74,7 +112,9 @@ const getNotifications = async (req, res) => {
 
 const getUserNotifications = async (req, res) => {
   try {
+    await purgeExpiredNotifications();
     const userId = req.user?._id || req.user?.id;
+    const cutoff = getNotificationExpiryCutoff();
 
     if (!userId || !mongoose.Types.ObjectId.isValid(userId)) {
       return res.status(400).json({
@@ -84,6 +124,7 @@ const getUserNotifications = async (req, res) => {
     }
 
     const notifications = await Notification.find({
+      createdAt: { $gte: cutoff },
       status: { $in: ["sent", "partial"] },
       $or: [
         { audienceType: "all" },
@@ -277,4 +318,5 @@ module.exports = {
   getUserNotifications,
   createNotification,
   deleteNotification,
+  purgeExpiredNotifications,
 };

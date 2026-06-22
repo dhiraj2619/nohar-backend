@@ -29,6 +29,9 @@ const { locationRouter } = require("./routes/location.route");
 const { leadRouter } = require("./routes/lead.route");
 const { initializeFirebase } = require("./services/notification.service");
 const { markStaleCartsAbandoned } = require("./services/lead.service");
+const {
+  purgeExpiredNotifications,
+} = require("./controllers/notification.controller");
 
 const app = express();
 const port = PORT;
@@ -80,6 +83,10 @@ app.listen(port, () => {
   console.log(`server is running on http://localhost:${port}`);
 });
 
+purgeExpiredNotifications().catch(error => {
+  console.error("Notification startup sweep failed:", error.message);
+});
+
 setInterval(
   () => {
     markStaleCartsAbandoned(process.env.CART_ABANDON_MINUTES || 60).catch(
@@ -89,4 +96,13 @@ setInterval(
     );
   },
   Number(process.env.CART_ABANDON_SWEEP_MS || 15 * 60 * 1000),
+);
+
+setInterval(
+  () => {
+    purgeExpiredNotifications().catch(error => {
+      console.error("Notification sweep failed:", error.message);
+    });
+  },
+  Number(process.env.NOTIFICATION_SWEEP_MS || 60 * 60 * 1000),
 );
