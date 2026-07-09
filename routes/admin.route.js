@@ -1,6 +1,7 @@
 const {
   getOwnerAdmin,
   getCustomers,
+  getRewards,
   loginAdmin,
 } = require("../controllers/admin.controller");
 const {
@@ -39,6 +40,7 @@ const adminRouter = require("express").Router();
 adminRouter.post("/login", loginAdmin);
 adminRouter.get("/owner", getOwnerAdmin);
 adminRouter.get("/customers", isAdminAuth, getCustomers);
+adminRouter.get("/rewards", isAdminAuth, getRewards);
 adminRouter.get("/orders", isAdminAuth, getOrders);
 adminRouter.get("/payments", isAdminAuth, getPayments);
 adminRouter.post("/payments/sync-razorpay", isAdminAuth, syncRazorpayPayments);

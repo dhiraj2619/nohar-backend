@@ -70,6 +70,16 @@ const buildPublicSettingsPayload = (settings) => ({
     settings?.freeShippingAbove !== null
       ? Number(settings.freeShippingAbove)
       : 0,
+  newCustomerWelcomeBonus:
+    settings?.newCustomerWelcomeBonus !== undefined &&
+    settings?.newCustomerWelcomeBonus !== null
+      ? Number(settings.newCustomerWelcomeBonus)
+      : 50,
+  orderRewardDefault:
+    settings?.orderRewardDefault !== undefined &&
+    settings?.orderRewardDefault !== null
+      ? Number(settings.orderRewardDefault)
+      : 2,
   maintenanceMode:
     settings?.maintenanceMode !== undefined
       ? Boolean(settings.maintenanceMode)
@@ -144,6 +154,8 @@ const updateSettings = async (req, res) => {
       partialPaymentType,
       partialPaymentValue,
       freeShippingAbove,
+      newCustomerWelcomeBonus,
+      orderRewardDefault,
       removeAuthorizedSignatory,
     } = req.body;
 
@@ -189,6 +201,18 @@ const updateSettings = async (req, res) => {
       settings.freeShippingAbove = Number.isNaN(normalizedFreeShippingAbove)
         ? settings.freeShippingAbove
         : normalizedFreeShippingAbove;
+    }
+    if (newCustomerWelcomeBonus !== undefined) {
+      const normalizedWelcomeBonus = Number(newCustomerWelcomeBonus);
+      settings.newCustomerWelcomeBonus = Number.isNaN(normalizedWelcomeBonus)
+        ? settings.newCustomerWelcomeBonus
+        : normalizedWelcomeBonus;
+    }
+    if (orderRewardDefault !== undefined) {
+      const normalizedOrderRewardDefault = Number(orderRewardDefault);
+      settings.orderRewardDefault = Number.isNaN(normalizedOrderRewardDefault)
+        ? settings.orderRewardDefault
+        : normalizedOrderRewardDefault;
     }
 
     if (

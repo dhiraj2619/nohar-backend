@@ -8,6 +8,8 @@ const {
   ADMIN_NAME,
 } = require("../config/config");
 const User = require("../models/users.model");
+const WalletTransaction = require("../models/walletTransaction.model");
+const AdminInfo = require("../models/adminInfo.model");
 const { sendPushToUsers } = require("../services/notification.service");
 
 const buildOwnerProfile = () => ({
@@ -250,7 +252,9 @@ const getNotificationRecipients = async (req, res) => {
 const getCustomers = async (req, res) => {
   try {
     const users = await User.find()
-      .select("_id fullName email phone isActive fcmToken createdAt updatedAt")
+      .select(
+        "_id fullName email phone isActive fcmToken signupBonusGranted createdAt updatedAt",
+      )
       .sort({ createdAt: -1 });
 
     return res.status(200).json({
@@ -263,6 +267,8 @@ const getCustomers = async (req, res) => {
         phone: user.phone,
         isActive: user.isActive,
         hasFcmToken: Boolean(String(user.fcmToken || "").trim()),
+        signupBonusGranted: Boolean(user.signupBonusGranted),
+        welcomeBonusGranted: Boolean(user.signupBonusGranted),
         createdAt: user.createdAt,
         updatedAt: user.updatedAt,
       })),
@@ -277,10 +283,94 @@ const getCustomers = async (req, res) => {
   }
 };
 
+const getRewards = async (req, res) => {
+  try {
+    const settings = await AdminInfo.findOne()
+      .select("newCustomerWelcomeBonus orderRewardDefault updatedAt createdAt")
+      .lean();
+
+    const transactions = await WalletTransaction.find({
+      type: { $in: ["SIGNUP_BONUS", "ORDER_REWARD", "REDEEM", "EXPIRE", "ADJUSTMENT"] },
+    })
+      .populate("user", "fullName email phone")
+      .populate("sourceOrder", "_id orderNumber totalPrice amountPaid paymentMode")
+      .sort({ createdAt: -1 })
+      .limit(250)
+      .lean();
+
+    const summary = transactions.reduce(
+      (acc, tx) => {
+        acc.totalTransactions += 1;
+        if (tx.type === "SIGNUP_BONUS") acc.signupBonuses += 1;
+        if (tx.type === "ORDER_REWARD") acc.orderRewards += 1;
+        if (tx.type === "REDEEM") acc.redeems += 1;
+        acc.totalAmount += Number(tx.amount || 0);
+        acc.totalPoints += Number(tx.points || 0);
+        return acc;
+      },
+      {
+        totalTransactions: 0,
+        signupBonuses: 0,
+        orderRewards: 0,
+        redeems: 0,
+        totalAmount: 0,
+        totalPoints: 0,
+      },
+    );
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        settings: {
+          newCustomerWelcomeBonus: Number(settings?.newCustomerWelcomeBonus ?? 50),
+          orderRewardDefault: Number(settings?.orderRewardDefault ?? 2),
+          updatedAt: settings?.updatedAt || settings?.createdAt || null,
+        },
+        summary,
+        transactions: transactions.map((tx) => ({
+          _id: tx._id,
+          type: tx.type,
+          amount: tx.amount,
+          points: tx.points,
+          note: tx.note,
+          status: tx.status,
+          expiresAt: tx.expiresAt,
+          createdAt: tx.createdAt,
+          user: tx.user
+            ? {
+                _id: tx.user._id,
+                fullName: tx.user.fullName,
+                email: tx.user.email,
+                phone: tx.user.phone,
+              }
+            : null,
+          sourceOrder: tx.sourceOrder
+            ? {
+                _id: tx.sourceOrder._id,
+                orderNumber: tx.sourceOrder.orderNumber,
+                totalPrice: tx.sourceOrder.totalPrice,
+                amountPaid: tx.sourceOrder.amountPaid,
+                paymentMode: tx.sourceOrder.paymentMode,
+              }
+            : null,
+        })),
+      },
+    });
+  } catch (error) {
+    console.error("Error fetching rewards:", error);
+    return res.status(500).json({
+      success: false,
+      message: "An error occurred while fetching rewards",
+      error: error.message,
+    });
+  }
+};
+
 module.exports = {
   loginAdmin,
   getOwnerAdmin,
   sendManualNotification,
   getNotificationRecipients,
   getCustomers,
+  getRewards,
 };

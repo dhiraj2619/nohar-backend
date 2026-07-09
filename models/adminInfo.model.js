@@ -68,6 +68,16 @@ const adminInfoSchema = new mongoose.Schema(
       default: 0,
       min: 0,
     },
+    newCustomerWelcomeBonus: {
+      type: Number,
+      default: 50,
+      min: 0,
+    },
+    orderRewardDefault: {
+      type: Number,
+      default: 2,
+      min: 0,
+    },
     maintenanceMode: {
       type: Boolean,
       default: false,

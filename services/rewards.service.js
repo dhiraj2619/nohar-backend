@@ -1,32 +1,48 @@
 const WalletTransaction = require("../models/walletTransaction.model");
+const AdminInfo = require("../models/adminInfo.model");
 const User = require("../models/users.model");
 
-const SIGNUP_BONUS_AMOUNT = 50;
 const SIGNUP_BONUS_VALID_DAYS = 30;
-const POINTS_PER_100_SPENT = 2;
+const DEFAULT_SIGNUP_BONUS_AMOUNT = 50;
+const DEFAULT_ORDER_REWARD_DEFAULT = 2;
 
 const addDays = (days) => {
   return new Date(Date.now() + days * 24 * 60 * 60 * 1000);
+};
+
+const getRewardSettings = async () => {
+  const settings = await AdminInfo.findOne()
+    .select("newCustomerWelcomeBonus orderRewardDefault")
+    .lean();
+
+  return {
+    welcomeBonusAmount: Number(settings?.newCustomerWelcomeBonus ?? DEFAULT_SIGNUP_BONUS_AMOUNT),
+    orderRewardDefault: Number(settings?.orderRewardDefault ?? DEFAULT_ORDER_REWARD_DEFAULT),
+  };
 };
 
 const creditSignupBonus = async (userId) => {
   const user = await User.findById(userId);
 
   if (!user || user.signupBonusGranted) return null;
+  const { welcomeBonusAmount } = await getRewardSettings();
+  const bonusAmount = Math.max(0, Number(welcomeBonusAmount || 0));
+
+  if (bonusAmount <= 0) return null;
 
   const expiresAt = addDays(SIGNUP_BONUS_VALID_DAYS);
 
   const tx = await WalletTransaction.create({
     user: user._id,
     type: "SIGNUP_BONUS",
-    amount: SIGNUP_BONUS_AMOUNT,
+    amount: bonusAmount,
     points: 0,
     note: "Welcome Wallet Bonus",
     expiresAt,
     status: "ACTIVE",
   });
 
-  user.walletBalance += SIGNUP_BONUS_AMOUNT;
+  user.walletBalance += bonusAmount;
   user.signupBonusGranted = true;
   await user.save();
 
@@ -37,9 +53,11 @@ const earnRewardPoints = async ({ userId, amount, orderId }) => {
   const user = await User.findById(userId);
 
   if (!user) return null;
+  const { orderRewardDefault } = await getRewardSettings();
 
   const numericAmount = Number(amount || 0);
-  const points = Math.floor(numericAmount / 100) * POINTS_PER_100_SPENT;
+  const pointsPer100 = Math.max(0, Number(orderRewardDefault || 0));
+  const points = Math.floor(numericAmount / 100) * pointsPer100;
 
   if (points <= 0) return null;
 
