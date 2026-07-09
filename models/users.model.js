@@ -45,6 +45,20 @@ const userSchema = new mongoose.Schema(
       type: Boolean,
       default: false,
     },
+    walletBalance: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    rewardPoints: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },  
+    signupBonusGranted: {
+      type: Boolean,
+      default: false,
+    },
     isActive: {
       type: Boolean,
       default: true,

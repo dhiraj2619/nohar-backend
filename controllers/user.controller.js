@@ -14,6 +14,7 @@ const {
 } = require("../config/config");
 const Otp = require("../models/otp.model");
 const User = require("../models/users.model");
+const { creditSignupBonus } = require("../services/rewards.service");
 
 const generateOTP = () => Math.floor(100000 + Math.random() * 900000);
 const DEFAULT_OTP_APP_SIGNATURE = "jLC652FxiEr";
@@ -420,6 +421,14 @@ const completeUserProfile = async (req, res) => {
     user.profileCompleted = true;
 
     await user.save();
+
+    if (!user.signupBonusGranted) {
+      try {
+        await creditSignupBonus(user._id);
+      } catch (bonusError) {
+        console.error("Signup bonus credit failed:", bonusError.message);
+      }
+    }
 
     return res.status(200).json({
       success: true,
