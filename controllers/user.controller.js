@@ -367,6 +367,9 @@ const verifyOTP = async (req, res) => {
         fullName: user.fullName,
         email: user.email,
         profileCompleted: user.profileCompleted,
+        walletBalance: user.walletBalance || 0,
+        rewardPoints: user.rewardPoints || 0,
+        signupBonusGranted: Boolean(user.signupBonusGranted),
       },
       token,
     });
@@ -430,15 +433,22 @@ const completeUserProfile = async (req, res) => {
       }
     }
 
+    const refreshedUser = await User.findById(userId).select(
+      "_id phone fullName email profileCompleted walletBalance rewardPoints signupBonusGranted",
+    );
+
     return res.status(200).json({
       success: true,
       message: "Profile completed successfully",
       user: {
-        _id: user._id,
-        phone: user.phone,
-        fullName: user.fullName,
-        email: user.email,
-        profileCompleted: user.profileCompleted,
+        _id: refreshedUser._id,
+        phone: refreshedUser.phone,
+        fullName: refreshedUser.fullName,
+        email: refreshedUser.email,
+        profileCompleted: refreshedUser.profileCompleted,
+        walletBalance: refreshedUser.walletBalance || 0,
+        rewardPoints: refreshedUser.rewardPoints || 0,
+        signupBonusGranted: Boolean(refreshedUser.signupBonusGranted),
       },
     });
   } catch (error) {
