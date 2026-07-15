@@ -349,6 +349,7 @@ const getRewards = async (req, res) => {
                 _id: tx.sourceOrder._id,
                 orderNumber: tx.sourceOrder.orderNumber,
                 totalPrice: tx.sourceOrder.totalPrice,
+                orderAmount: tx.sourceOrder.totalPrice,
                 amountPaid: tx.sourceOrder.amountPaid,
                 paymentMode: tx.sourceOrder.paymentMode,
               }
@@ -366,6 +367,117 @@ const getRewards = async (req, res) => {
   }
 };
 
+const updateRewardTransaction = async (req, res) => {
+  const session = await mongoose.startSession();
+
+  try {
+    const { transactionId } = req.params;
+    const { points } = req.body;
+    const normalizedPoints = Number(points);
+
+    if (!mongoose.Types.ObjectId.isValid(transactionId)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid reward transaction id",
+      });
+    }
+
+    if (!Number.isFinite(normalizedPoints) || normalizedPoints < 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Points must be a valid non-negative number",
+      });
+    }
+
+    session.startTransaction();
+
+    const transaction = await WalletTransaction.findById(transactionId).session(
+      session,
+    );
+
+    if (!transaction) {
+      await session.abortTransaction();
+      return res.status(404).json({
+        success: false,
+        message: "Reward transaction not found",
+      });
+    }
+
+    if (transaction.type !== "ORDER_REWARD") {
+      await session.abortTransaction();
+      return res.status(400).json({
+        success: false,
+        message: "Only order reward entries can be modified",
+      });
+    }
+
+    const user = await User.findById(transaction.user).session(session);
+
+    if (!user) {
+      await session.abortTransaction();
+      return res.status(404).json({
+        success: false,
+        message: "User not found",
+      });
+    }
+
+    const currentPoints = Number(transaction.points || 0);
+    const pointDelta = Number((normalizedPoints - currentPoints).toFixed(2));
+    const nextRewardPoints = Number(user.rewardPoints || 0) + pointDelta;
+
+    if (nextRewardPoints < 0) {
+      await session.abortTransaction();
+      return res.status(400).json({
+        success: false,
+        message: "Updated reward points cannot make user balance negative",
+      });
+    }
+
+    transaction.points = normalizedPoints;
+    transaction.note = "Order reward updated by admin";
+    await transaction.save({ session });
+
+    user.rewardPoints = nextRewardPoints;
+    await user.save({ session });
+
+    await session.commitTransaction();
+
+    const refreshedTransaction = await WalletTransaction.findById(transactionId)
+      .populate("user", "fullName email phone")
+      .populate("sourceOrder", "_id orderNumber totalPrice amountPaid paymentMode")
+      .lean();
+
+    return res.status(200).json({
+      success: true,
+      message: "Reward updated successfully",
+      data: {
+        transaction: refreshedTransaction
+          ? {
+              ...refreshedTransaction,
+              sourceOrder: refreshedTransaction.sourceOrder
+                ? {
+                    ...refreshedTransaction.sourceOrder,
+                    orderAmount: refreshedTransaction.sourceOrder.totalPrice,
+                  }
+                : null,
+            }
+          : null,
+        rewardPoints: user.rewardPoints,
+      },
+    });
+  } catch (error) {
+    await session.abortTransaction().catch(() => {});
+    console.error("Error updating reward transaction:", error);
+    return res.status(500).json({
+      success: false,
+      message: "An error occurred while updating reward transaction",
+      error: error.message,
+    });
+  } finally {
+    session.endSession();
+  }
+};
+
 module.exports = {
   loginAdmin,
   getOwnerAdmin,
@@ -373,4 +485,5 @@ module.exports = {
   getNotificationRecipients,
   getCustomers,
   getRewards,
+  updateRewardTransaction,
 };

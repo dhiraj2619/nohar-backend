@@ -2,6 +2,7 @@ const {
   getOwnerAdmin,
   getCustomers,
   getRewards,
+  updateRewardTransaction,
   loginAdmin,
 } = require("../controllers/admin.controller");
 const {
@@ -41,6 +42,7 @@ adminRouter.post("/login", loginAdmin);
 adminRouter.get("/owner", getOwnerAdmin);
 adminRouter.get("/customers", isAdminAuth, getCustomers);
 adminRouter.get("/rewards", isAdminAuth, getRewards);
+adminRouter.patch("/rewards/:transactionId", isAdminAuth, updateRewardTransaction);
 adminRouter.get("/orders", isAdminAuth, getOrders);
 adminRouter.get("/payments", isAdminAuth, getPayments);
 adminRouter.post("/payments/sync-razorpay", isAdminAuth, syncRazorpayPayments);
