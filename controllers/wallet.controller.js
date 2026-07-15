@@ -18,6 +18,7 @@ const getWalletDetails = async (req, res) => {
     const recentTransactions = await WalletTransaction.find({
       user: user._id,
     })
+      .populate("sourceOrder", "_id orderNumber totalPrice amountPaid paymentMode")
       .sort({ createdAt: -1 })
       .limit(20);
 
@@ -34,6 +35,53 @@ const getWalletDetails = async (req, res) => {
     return res.status(500).json({
       success: false,
       message: error.message || "Failed to fetch wallet details",
+    });
+  }
+};
+
+const getWalletRewards = async (req, res) => {
+  try {
+    const user = await User.findById(req.user._id).select(
+      "_id walletBalance rewardPoints signupBonusGranted",
+    );
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: "User not found",
+      });
+    }
+
+    const transactions = await WalletTransaction.find({
+      user: user._id,
+      type: { $in: ["SIGNUP_BONUS", "ORDER_REWARD", "REDEEM", "EXPIRE", "ADJUSTMENT"] },
+    })
+      .populate("sourceOrder", "_id orderNumber totalPrice amountPaid paymentMode")
+      .sort({ createdAt: -1 })
+      .limit(50)
+      .lean();
+
+    return res.status(200).json({
+      success: true,
+      wallet: {
+        walletBalance: user.walletBalance || 0,
+        rewardPoints: user.rewardPoints || 0,
+        signupBonusGranted: Boolean(user.signupBonusGranted),
+      },
+      transactions: transactions.map((tx) => ({
+        ...tx,
+        sourceOrder: tx.sourceOrder
+          ? {
+              ...tx.sourceOrder,
+              orderAmount: tx.sourceOrder.totalPrice,
+            }
+          : null,
+      })),
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: error.message || "Failed to fetch wallet rewards",
     });
   }
 };
@@ -68,5 +116,6 @@ const redeemWalletPoints = async (req, res) => {
 
 module.exports = {
   getWalletDetails,
+  getWalletRewards,
   redeemWalletPoints,
 };
