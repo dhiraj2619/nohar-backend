@@ -10,7 +10,10 @@ const Product = require("../models/products.model");
 const AdminInfo = require("../models/adminInfo.model");
 const User = require("../models/users.model");
 const { markCartConverted } = require("../services/lead.service");
-const { earnRewardPoints } = require("../services/rewards.service");
+const {
+  calculateOrderRewardPoints,
+  earnRewardPoints,
+} = require("../services/rewards.service");
 const {
   MAIL_FROM,
   ORDER_OWNER_EMAIL,
@@ -1108,14 +1111,12 @@ const notifyOrderUser = async (userId, order, status) => {
 
 const runPostOrderTasks = ({ userId, order, customer, customerEmail }) => {
   setImmediate(async () => {
-    const rewardAmount =
-      order.paymentMode === "COD"
-        ? 0
-        : Number(order.amountPaid || order.totalPrice || 0);
+    const rewardAmount = Number(order.totalPrice || 0);
+    const rewardPoints = calculateOrderRewardPoints(rewardAmount);
 
     await Promise.allSettled([
       notifyOrderUser(userId, order, "ORDER_PLACED"),
-      rewardAmount > 0
+      rewardPoints > 0
         ? earnRewardPoints({
             userId,
             amount: rewardAmount,

@@ -4,7 +4,7 @@ const User = require("../models/users.model");
 
 const SIGNUP_BONUS_VALID_DAYS = 30;
 const DEFAULT_SIGNUP_BONUS_AMOUNT = 50;
-const DEFAULT_ORDER_REWARD_DEFAULT = 2;
+const ORDER_REWARD_POINTS_PER_100 = 2;
 
 const addDays = (days) => {
   return new Date(Date.now() + days * 24 * 60 * 60 * 1000);
@@ -12,12 +12,11 @@ const addDays = (days) => {
 
 const getRewardSettings = async () => {
   const settings = await AdminInfo.findOne()
-    .select("newCustomerWelcomeBonus orderRewardDefault")
+    .select("newCustomerWelcomeBonus")
     .lean();
 
   return {
     welcomeBonusAmount: Number(settings?.newCustomerWelcomeBonus ?? DEFAULT_SIGNUP_BONUS_AMOUNT),
-    orderRewardDefault: Number(settings?.orderRewardDefault ?? DEFAULT_ORDER_REWARD_DEFAULT),
   };
 };
 
@@ -49,15 +48,22 @@ const creditSignupBonus = async (userId) => {
   return tx;
 };
 
+const calculateOrderRewardPoints = (amount) => {
+  const numericAmount = Number(amount || 0);
+
+  if (!Number.isFinite(numericAmount) || numericAmount <= 0) {
+    return 0;
+  }
+
+  return Math.floor(numericAmount / 100) * ORDER_REWARD_POINTS_PER_100;
+};
+
 const earnRewardPoints = async ({ userId, amount, orderId }) => {
   const user = await User.findById(userId);
 
   if (!user) return null;
-  const { orderRewardDefault } = await getRewardSettings();
 
-  const numericAmount = Number(amount || 0);
-  const pointsPer100 = Math.max(0, Number(orderRewardDefault || 0));
-  const points = Math.floor(numericAmount / 100) * pointsPer100;
+  const points = calculateOrderRewardPoints(amount);
 
   if (points <= 0) return null;
 
@@ -131,6 +137,7 @@ const expireSignupBonuses = async () => {
 
 module.exports = {
   creditSignupBonus,
+  calculateOrderRewardPoints,
   earnRewardPoints,
   redeemPoints,
   expireSignupBonuses,
