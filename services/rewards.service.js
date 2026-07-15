@@ -3,11 +3,16 @@ const AdminInfo = require("../models/adminInfo.model");
 const User = require("../models/users.model");
 
 const SIGNUP_BONUS_VALID_DAYS = 30;
+const ORDER_REWARD_MATURITY_MINUTES = 10;
 const DEFAULT_SIGNUP_BONUS_AMOUNT = 50;
 const ORDER_REWARD_POINTS_PER_100 = 2;
 
 const addDays = (days) => {
   return new Date(Date.now() + days * 24 * 60 * 60 * 1000);
+};
+
+const addMinutes = (minutes) => {
+  return new Date(Date.now() + minutes * 60 * 1000);
 };
 
 const getRewardSettings = async () => {
@@ -74,6 +79,7 @@ const earnRewardPoints = async ({ userId, amount, orderId }) => {
     points,
     sourceOrder: orderId || null,
     note: "Reward points for order",
+    expiresAt: addMinutes(ORDER_REWARD_MATURITY_MINUTES),
     status: "ACTIVE",
   });
 
@@ -134,6 +140,44 @@ const expireSignupBonuses = async () => {
   return expiredTransactions.length;
 };
 
+const settleMaturedOrderRewards = async () => {
+  const now = new Date();
+
+  const maturedTransactions = await WalletTransaction.find({
+    type: "ORDER_REWARD",
+    status: "ACTIVE",
+    expiresAt: { $lte: now },
+    points: { $gt: 0 },
+  });
+
+  for (const tx of maturedTransactions) {
+    const points = Number(tx.points || 0);
+
+    if (points <= 0) {
+      continue;
+    }
+
+    const user = await User.findById(tx.user);
+
+    if (!user) {
+      tx.status = "EXPIRED";
+      tx.note = "Order reward could not be settled because user was missing";
+      await tx.save();
+      continue;
+    }
+
+    user.rewardPoints = Math.max(0, Number(user.rewardPoints || 0) - points);
+    user.walletBalance = Number(user.walletBalance || 0) + points;
+    await user.save();
+
+    tx.status = "SETTLED";
+    tx.note = "Order reward moved to wallet";
+    await tx.save();
+  }
+
+  return maturedTransactions.length;
+};
+
 
 module.exports = {
   creditSignupBonus,
@@ -141,4 +185,5 @@ module.exports = {
   earnRewardPoints,
   redeemPoints,
   expireSignupBonuses,
+  settleMaturedOrderRewards,
 };

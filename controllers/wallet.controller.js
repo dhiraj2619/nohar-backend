@@ -1,9 +1,14 @@
 const User = require("../models/users.model");
 const WalletTransaction = require("../models/walletTransaction.model");
-const { redeemPoints } = require("../services/rewards.service");
+const {
+  redeemPoints,
+  settleMaturedOrderRewards,
+} = require("../services/rewards.service");
 
 const getWalletDetails = async (req, res) => {
   try {
+    await settleMaturedOrderRewards();
+
     const user = await User.findById(req.user._id).select(
       "_id walletBalance rewardPoints signupBonusGranted",
     );
@@ -39,8 +44,25 @@ const getWalletDetails = async (req, res) => {
   }
 };
 
+const refreshWalletRewards = async (req, res) => {
+  try {
+    await settleMaturedOrderRewards();
+    return res.status(200).json({
+      success: true,
+      message: "Wallet rewards refreshed",
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: error.message || "Failed to refresh wallet rewards",
+    });
+  }
+};
+
 const getWalletRewards = async (req, res) => {
   try {
+    await settleMaturedOrderRewards();
+
     const user = await User.findById(req.user._id).select(
       "_id walletBalance rewardPoints signupBonusGranted",
     );
@@ -117,5 +139,6 @@ const redeemWalletPoints = async (req, res) => {
 module.exports = {
   getWalletDetails,
   getWalletRewards,
+  refreshWalletRewards,
   redeemWalletPoints,
 };

@@ -37,7 +37,7 @@ const walletTransactionSchema = new mongoose.Schema(
     },
     status: {
       type: String,
-      enum: ["ACTIVE", "EXPIRED", "REDEEMED"],
+      enum: ["ACTIVE", "EXPIRED", "REDEEMED", "SETTLED"],
       default: "ACTIVE",
     },
   },

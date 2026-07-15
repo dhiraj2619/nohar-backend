@@ -31,6 +31,10 @@ const { leadRouter } = require("./routes/lead.route");
 const { initializeFirebase } = require("./services/notification.service");
 const { markStaleCartsAbandoned } = require("./services/lead.service");
 const {
+  expireSignupBonuses,
+  settleMaturedOrderRewards,
+} = require("./services/rewards.service");
+const {
   purgeExpiredNotifications,
 } = require("./controllers/notification.controller");
 
@@ -89,6 +93,14 @@ purgeExpiredNotifications().catch(error => {
   console.error("Notification startup sweep failed:", error.message);
 });
 
+settleMaturedOrderRewards().catch(error => {
+  console.error("Reward settlement startup sweep failed:", error.message);
+});
+
+expireSignupBonuses().catch(error => {
+  console.error("Signup bonus startup sweep failed:", error.message);
+});
+
 setInterval(
   () => {
     markStaleCartsAbandoned(process.env.CART_ABANDON_MINUTES || 60).catch(
@@ -107,4 +119,13 @@ setInterval(
     });
   },
   Number(process.env.NOTIFICATION_SWEEP_MS || 60 * 60 * 1000),
+);
+
+setInterval(
+  () => {
+    settleMaturedOrderRewards().catch(error => {
+      console.error("Reward settlement sweep failed:", error.message);
+    });
+  },
+  Number(process.env.REWARD_SETTLEMENT_SWEEP_MS || 60 * 1000),
 );
