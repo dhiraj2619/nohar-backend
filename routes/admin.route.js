@@ -2,6 +2,7 @@ const {
   getOwnerAdmin,
   getCustomers,
   getRewards,
+  promoteManualReward,
   updateRewardTransaction,
   loginAdmin,
 } = require("../controllers/admin.controller");
@@ -41,6 +42,7 @@ const adminRouter = require("express").Router();
 adminRouter.post("/login", loginAdmin);
 adminRouter.get("/owner", getOwnerAdmin);
 adminRouter.get("/customers", isAdminAuth, getCustomers);
+adminRouter.post("/customers/:customerId/manual-reward", isAdminAuth, promoteManualReward);
 adminRouter.get("/rewards", isAdminAuth, getRewards);
 adminRouter.patch("/rewards/:transactionId", isAdminAuth, updateRewardTransaction);
 adminRouter.get("/orders", isAdminAuth, getOrders);

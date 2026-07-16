@@ -8,6 +8,7 @@ const {
   ADMIN_NAME,
 } = require("../config/config");
 const User = require("../models/users.model");
+const Order = require("../models/order.model");
 const WalletTransaction = require("../models/walletTransaction.model");
 const AdminInfo = require("../models/adminInfo.model");
 const { sendPushToUsers } = require("../services/notification.service");
@@ -257,21 +258,59 @@ const getCustomers = async (req, res) => {
       )
       .sort({ createdAt: -1 });
 
+    const orderStats = await Order.aggregate([
+      {
+        $group: {
+          _id: "$user",
+          orderCount: { $sum: 1 },
+          totalSpent: { $sum: { $ifNull: ["$totalPrice", 0] } },
+        },
+      },
+    ]);
+
+    const statsMap = new Map(
+      orderStats.map((item) => [
+        String(item._id),
+        {
+          orderCount: Number(item.orderCount || 0),
+          totalSpent: Number(item.totalSpent || 0),
+        },
+      ]),
+    );
+
+    const customers = users
+      .map((user) => {
+        const stats = statsMap.get(String(user._id)) || {};
+
+        return {
+          _id: user._id,
+          fullName: user.fullName,
+          email: user.email,
+          phone: user.phone,
+          isActive: user.isActive,
+          hasFcmToken: Boolean(String(user.fcmToken || "").trim()),
+          signupBonusGranted: Boolean(user.signupBonusGranted),
+          welcomeBonusGranted: Boolean(user.signupBonusGranted),
+          createdAt: user.createdAt,
+          updatedAt: user.updatedAt,
+          orderCount: stats.orderCount || 0,
+          totalSpent: stats.totalSpent || 0,
+        };
+      })
+      .sort((first, second) => {
+        const orderDelta = Number(second.orderCount || 0) - Number(first.orderCount || 0);
+
+        if (orderDelta !== 0) {
+          return orderDelta;
+        }
+
+        return new Date(second.createdAt || 0) - new Date(first.createdAt || 0);
+      });
+
     return res.status(200).json({
       success: true,
-      count: users.length,
-      data: users.map((user) => ({
-        _id: user._id,
-        fullName: user.fullName,
-        email: user.email,
-        phone: user.phone,
-        isActive: user.isActive,
-        hasFcmToken: Boolean(String(user.fcmToken || "").trim()),
-        signupBonusGranted: Boolean(user.signupBonusGranted),
-        welcomeBonusGranted: Boolean(user.signupBonusGranted),
-        createdAt: user.createdAt,
-        updatedAt: user.updatedAt,
-      })),
+      count: customers.length,
+      data: customers,
     });
   } catch (error) {
     console.error("Error fetching customers:", error);
@@ -280,6 +319,101 @@ const getCustomers = async (req, res) => {
       message: "An error occurred while fetching customers",
       error: error.message,
     });
+  }
+};
+
+const promoteManualReward = async (req, res) => {
+  const session = await mongoose.startSession();
+
+  try {
+    const { customerId } = req.params;
+    const { points, note } = req.body;
+    const normalizedPoints = Number(points);
+
+    if (!mongoose.Types.ObjectId.isValid(customerId)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid customer id",
+      });
+    }
+
+    if (!Number.isFinite(normalizedPoints) || normalizedPoints <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Reward points must be greater than 0",
+      });
+    }
+
+    session.startTransaction();
+
+    const user = await User.findById(customerId).session(session);
+
+    if (!user) {
+      await session.abortTransaction();
+      return res.status(404).json({
+        success: false,
+        message: "Customer not found",
+      });
+    }
+
+    const [transaction] = await WalletTransaction.create(
+      [
+        {
+          user: user._id,
+          type: "ADJUSTMENT",
+          amount: 0,
+          points: normalizedPoints,
+          note:
+            String(note || "").trim() ||
+            "Manual reward promotion by admin",
+          status: "SETTLED",
+        },
+      ],
+      { session },
+    );
+
+    user.rewardPoints = Number(user.rewardPoints || 0) + normalizedPoints;
+    await user.save({ session });
+
+    await session.commitTransaction();
+
+    return res.status(200).json({
+      success: true,
+      message: "Reward promoted successfully",
+      data: {
+        transaction: transaction
+          ? {
+              _id: transaction._id,
+              type: transaction.type,
+              amount: transaction.amount,
+              points: transaction.points,
+              note: transaction.note,
+              status: transaction.status,
+              createdAt: transaction.createdAt,
+              user: {
+                _id: user._id,
+                fullName: user.fullName,
+                email: user.email,
+                phone: user.phone,
+              },
+            }
+          : null,
+        wallet: {
+          walletBalance: Number(user.walletBalance || 0),
+          rewardPoints: Number(user.rewardPoints || 0),
+        },
+      },
+    });
+  } catch (error) {
+    await session.abortTransaction().catch(() => {});
+    console.error("Error promoting manual reward:", error);
+    return res.status(500).json({
+      success: false,
+      message: "An error occurred while promoting reward",
+      error: error.message,
+    });
+  } finally {
+    session.endSession();
   }
 };
 
@@ -485,5 +619,6 @@ module.exports = {
   getNotificationRecipients,
   getCustomers,
   getRewards,
+  promoteManualReward,
   updateRewardTransaction,
 };
