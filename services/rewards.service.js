@@ -105,7 +105,7 @@ const redeemPoints = async ({ userId, points }) => {
   }
 
   user.rewardPoints -= redeemPointsValue;
-  user.walletBalance -= redeemPointsValue;
+  user.walletBalance = Number(user.walletBalance || 0) + redeemPointsValue;
 
   const tx = await WalletTransaction.create({
     user: user._id,
