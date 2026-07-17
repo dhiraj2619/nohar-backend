@@ -6,6 +6,13 @@ const SIGNUP_BONUS_VALID_DAYS = 30;
 const ORDER_REWARD_MATURITY_MINUTES = 10;
 const DEFAULT_SIGNUP_BONUS_AMOUNT = 50;
 const ORDER_REWARD_POINTS_PER_100 = 2;
+const REWARD_TRANSACTION_TYPES = [
+  "SIGNUP_BONUS",
+  "ORDER_REWARD",
+  "REDEEM",
+  "EXPIRE",
+  "ADJUSTMENT",
+];
 
 const addDays = (days) => {
   return new Date(Date.now() + days * 24 * 60 * 60 * 1000);
@@ -13,6 +20,32 @@ const addDays = (days) => {
 
 const addMinutes = (minutes) => {
   return new Date(Date.now() + minutes * 60 * 1000);
+};
+
+const calculateRewardPointBalance = (transactions = []) =>
+  transactions.reduce((total, tx) => {
+    const rawValue = Number(tx?.points || 0);
+
+    if (!Number.isFinite(rawValue)) {
+      return total;
+    }
+
+    if (tx?.type === "REDEEM" || tx?.type === "EXPIRE") {
+      return total - Math.abs(rawValue);
+    }
+
+    return total + Math.abs(rawValue);
+  }, 0);
+
+const getCurrentRewardPointBalance = async (userId) => {
+  const transactions = await WalletTransaction.find({
+    user: userId,
+    type: { $in: REWARD_TRANSACTION_TYPES },
+  })
+    .select("type points amount")
+    .lean();
+
+  return calculateRewardPointBalance(transactions);
 };
 
 const getRewardSettings = async () => {
@@ -95,16 +128,17 @@ const redeemPoints = async ({ userId, points }) => {
   if (!user) return null;
 
   const redeemPointsValue = Number(points || 0);
+  const currentRewardPoints = await getCurrentRewardPointBalance(userId);
 
   if (redeemPointsValue <= 0) {
     throw new Error("points must be greater than 0");
   }
 
-  if (user.rewardPoints < redeemPointsValue) {
+  if (currentRewardPoints < redeemPointsValue) {
     throw new Error("Insufficient reward points");
   }
 
-  user.rewardPoints -= redeemPointsValue;
+  user.rewardPoints = Math.max(0, currentRewardPoints - redeemPointsValue);
   user.walletBalance = Number(user.walletBalance || 0) + redeemPointsValue;
 
   const tx = await WalletTransaction.create({
@@ -182,6 +216,8 @@ const settleMaturedOrderRewards = async () => {
 module.exports = {
   creditSignupBonus,
   calculateOrderRewardPoints,
+  calculateRewardPointBalance,
+  getCurrentRewardPointBalance,
   earnRewardPoints,
   redeemPoints,
   expireSignupBonuses,
