@@ -1,18 +1,9 @@
 const User = require("../models/users.model");
 const WalletTransaction = require("../models/walletTransaction.model");
 const {
-  calculateRewardPointBalance,
   redeemPoints,
   settleMaturedOrderRewards,
 } = require("../services/rewards.service");
-
-const REWARD_TRANSACTION_TYPES = [
-  "SIGNUP_BONUS",
-  "ORDER_REWARD",
-  "REDEEM",
-  "EXPIRE",
-  "ADJUSTMENT",
-];
 
 const getWalletDetails = async (req, res) => {
   try {
@@ -29,13 +20,6 @@ const getWalletDetails = async (req, res) => {
       });
     }
 
-    const rewardTransactions = await WalletTransaction.find({
-      user: user._id,
-      type: { $in: REWARD_TRANSACTION_TYPES },
-    })
-      .select("type points amount")
-      .lean();
-
     const recentTransactions = await WalletTransaction.find({
       user: user._id,
     })
@@ -47,10 +31,7 @@ const getWalletDetails = async (req, res) => {
       success: true,
       wallet: {
         walletBalance: user.walletBalance || 0,
-        rewardPoints:
-          calculateRewardPointBalance(rewardTransactions) ||
-          user.rewardPoints ||
-          0,
+        rewardPoints: user.rewardPoints || 0,
         signupBonusGranted: Boolean(user.signupBonusGranted),
       },
       transactions: recentTransactions,
@@ -93,16 +74,9 @@ const getWalletRewards = async (req, res) => {
       });
     }
 
-    const rewardTransactions = await WalletTransaction.find({
-      user: user._id,
-      type: { $in: REWARD_TRANSACTION_TYPES },
-    })
-      .select("type points amount")
-      .lean();
-
     const transactions = await WalletTransaction.find({
       user: user._id,
-      type: { $in: REWARD_TRANSACTION_TYPES },
+      type: { $in: ["SIGNUP_BONUS", "ORDER_REWARD", "REDEEM", "EXPIRE", "ADJUSTMENT"] },
     })
       .populate("sourceOrder", "_id orderNumber totalPrice amountPaid paymentMode")
       .sort({ createdAt: -1 })
@@ -113,10 +87,7 @@ const getWalletRewards = async (req, res) => {
       success: true,
       wallet: {
         walletBalance: user.walletBalance || 0,
-        rewardPoints:
-          calculateRewardPointBalance(rewardTransactions) ||
-          user.rewardPoints ||
-          0,
+        rewardPoints: user.rewardPoints || 0,
         signupBonusGranted: Boolean(user.signupBonusGranted),
       },
       transactions: transactions.map((tx) => ({
