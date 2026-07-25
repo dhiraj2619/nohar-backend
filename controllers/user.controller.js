@@ -14,7 +14,7 @@ const {
 } = require("../config/config");
 const Otp = require("../models/otp.model");
 const User = require("../models/users.model");
-const { creditSignupBonus } = require("../services/rewards.service");
+const { creditSignupBonus, getPointBalance } = require("../services/rewards.service");
 
 const generateOTP = () => Math.floor(100000 + Math.random() * 900000);
 const DEFAULT_OTP_APP_SIGNATURE = "jLC652FxiEr";
@@ -367,8 +367,8 @@ const verifyOTP = async (req, res) => {
         fullName: user.fullName,
         email: user.email,
         profileCompleted: user.profileCompleted,
-        walletBalance: user.walletBalance || 0,
-        rewardPoints: user.rewardPoints || 0,
+        walletBalance: getPointBalance(user),
+        rewardPoints: getPointBalance(user),
         signupBonusGranted: Boolean(user.signupBonusGranted),
       },
       token,
@@ -446,8 +446,8 @@ const completeUserProfile = async (req, res) => {
         fullName: refreshedUser.fullName,
         email: refreshedUser.email,
         profileCompleted: refreshedUser.profileCompleted,
-        walletBalance: refreshedUser.walletBalance || 0,
-        rewardPoints: refreshedUser.rewardPoints || 0,
+        walletBalance: getPointBalance(refreshedUser),
+        rewardPoints: getPointBalance(refreshedUser),
         signupBonusGranted: Boolean(refreshedUser.signupBonusGranted),
       },
     });

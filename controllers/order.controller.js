@@ -3,8 +3,10 @@ const fs = require("fs");
 const path = require("path");
 const PDFDocument = require("pdfkit");
 const axios = require("axios");
+const mongoose = require("mongoose");
 const Order = require("../models/order.model");
 const Payment = require("../models/payment.model");
+const WalletTransaction = require("../models/walletTransaction.model");
 const ShippingInfo = require("../models/shippingInfo.model");
 const Product = require("../models/products.model");
 const AdminInfo = require("../models/adminInfo.model");
@@ -13,6 +15,8 @@ const { markCartConverted } = require("../services/lead.service");
 const {
   calculateOrderRewardPoints,
   earnRewardPoints,
+  getPointBalance,
+  syncPointBalance,
 } = require("../services/rewards.service");
 const {
   MAIL_FROM,
@@ -154,6 +158,17 @@ const normalizeCurrencyValue = (amount) => {
   const numericAmount = Number(amount || 0);
   return Number.isNaN(numericAmount) ? 0 : numericAmount;
 };
+
+const getHighestNumericValue = (...values) =>
+  values.reduce((highest, value) => {
+    const numericValue = normalizeCurrencyValue(value);
+
+    if (!Number.isFinite(numericValue)) {
+      return highest;
+    }
+
+    return numericValue > highest ? numericValue : highest;
+  }, 0);
 
 const hasNumberValue = (value) =>
   value !== undefined && value !== null && value !== "";
@@ -1128,6 +1143,8 @@ const runPostOrderTasks = ({ userId, order, customer, customerEmail }) => {
 };
 
 const createOrder = async (req, res) => {
+  const session = await mongoose.startSession();
+
   try {
     const {
       userId,
@@ -1135,12 +1152,21 @@ const createOrder = async (req, res) => {
       addressId,
       orderItems,
       totalPrice,
+      originalTotalPrice,
       paymentId,
       paymentMode,
       partialPercent,
       amountPaid,
       customerEmail,
       bookingSource,
+      walletAmountUsed,
+      walletAppliedAmount,
+      walletBalanceUsed,
+      walletUsed,
+      walletDebitAmount,
+      walletDeductedAmount,
+      rewardPointsUsed,
+      pointsUsed,
     } = req.body;
 
     const normalizedPaymentMode = String(paymentMode || "")
@@ -1156,6 +1182,18 @@ const createOrder = async (req, res) => {
       .trim()
       .toLowerCase();
     const storeDetails = await getStoreDetails();
+    const normalizedTotal = normalizeNumber(totalPrice);
+    const normalizedOriginalTotal = normalizeNumber(originalTotalPrice);
+    const normalizedPointsUsed = getHighestNumericValue(
+      walletAmountUsed,
+      walletAppliedAmount,
+      walletBalanceUsed,
+      walletUsed,
+      walletDebitAmount,
+      walletDeductedAmount,
+      rewardPointsUsed,
+      pointsUsed,
+    );
 
     if (
       !userId ||
@@ -1201,14 +1239,6 @@ const createOrder = async (req, res) => {
       });
     }
 
-    const normalizedTotal = normalizeNumber(totalPrice);
-
-    if (!normalizedTotal || normalizedTotal <= 0) {
-      return res
-        .status(400)
-        .json({ success: false, message: "Invalid total price" });
-    }
-
     const requiresOnlinePayment =
       normalizedPaymentMode === "FULL" ||
       normalizedPaymentMode === "PARTIAL_COD";
@@ -1227,7 +1257,7 @@ const createOrder = async (req, res) => {
     }
 
     const customer = await User.findById(userId).select(
-      "_id fullName email phone fcmToken",
+      "_id fullName email phone fcmToken walletBalance rewardPoints signupBonusGranted",
     );
 
     if (!customer) {
@@ -1253,6 +1283,33 @@ const createOrder = async (req, res) => {
       return res
         .status(400)
         .json({ success: false, message: "No valid shipping info found" });
+    }
+
+    const customerPointBalance = getPointBalance(customer);
+    if (normalizedPointsUsed > customerPointBalance) {
+      return res.status(400).json({
+        success: false,
+        message: "Insufficient reward points",
+      });
+    }
+
+    const pointsToUse = normalizedPointsUsed;
+    const resolvedOriginalTotal =
+      normalizedOriginalTotal > 0
+        ? normalizedOriginalTotal
+        : Number((normalizedTotal + pointsToUse).toFixed(2));
+
+    if (!normalizedTotal || normalizedTotal <= 0) {
+      return res
+        .status(400)
+        .json({ success: false, message: "Invalid total price" });
+    }
+
+    if (pointsToUse > resolvedOriginalTotal) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid point usage amount",
+      });
     }
 
     let normalizedPercent = 0;
@@ -1405,12 +1462,21 @@ const createOrder = async (req, res) => {
       );
     });
 
+    session.startTransaction();
+
     const order = new Order({
       user: userId,
       shippingInfo: selectedAddress,
       orderItems: normalizedOrderItems,
       bookingSource: normalizedBookingSource,
       totalPrice: normalizedTotal,
+      originalTotalPrice: resolvedOriginalTotal,
+      pointsUsed: pointsToUse,
+      walletAmountUsed: pointsToUse,
+      walletAppliedAmount: pointsToUse,
+      walletBalanceUsed: pointsToUse,
+      walletBalanceBefore: customerPointBalance,
+      walletBalanceAfter: Math.max(customerPointBalance - pointsToUse, 0),
       orderStatus: "ORDER_PLACED",
       payment: normalizedPaymentId,
       paymentMode: normalizedPaymentMode,
@@ -1425,7 +1491,29 @@ const createOrder = async (req, res) => {
       order.paidAt = paidAt;
     }
 
-    await order.save();
+    await order.save({ session });
+
+    if (pointsToUse > 0) {
+      await WalletTransaction.create(
+        [
+          {
+            user: customer._id,
+            type: "REDEEM",
+            amount: pointsToUse,
+            points: pointsToUse,
+            sourceOrder: order._id,
+            note: "Points used on order",
+            status: "REDEEMED",
+          },
+        ],
+        { session },
+      );
+
+      syncPointBalance(customer, customerPointBalance - pointsToUse);
+      await customer.save({ session });
+    }
+
+    await session.commitTransaction();
 
     if (normalizedPaymentId) {
       await Payment.findByIdAndUpdate(normalizedPaymentId, {
@@ -1458,7 +1546,10 @@ const createOrder = async (req, res) => {
       console.error("Cart lead conversion failed:", error.message);
     });
   } catch (error) {
+    await session.abortTransaction().catch(() => {});
     res.status(500).json({ success: false, message: error.message });
+  } finally {
+    session.endSession();
   }
 };
 

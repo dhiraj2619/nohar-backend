@@ -147,6 +147,42 @@ const orderSchema = new mongoose.Schema(
       default: 0,
       min: 0,
     },
+    originalTotalPrice: {
+      type: Number,
+      required: true,
+      default: 0,
+      min: 0,
+    },
+    pointsUsed: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    walletAmountUsed: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    walletAppliedAmount: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    walletBalanceUsed: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    walletBalanceBefore: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    walletBalanceAfter: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
     orderNumber: {
       type: String,
       required: true,

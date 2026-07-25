@@ -2,6 +2,7 @@ const User = require("../models/users.model");
 const WalletTransaction = require("../models/walletTransaction.model");
 const {
   redeemPoints,
+  getPointBalance,
   settleMaturedOrderRewards,
 } = require("../services/rewards.service");
 
@@ -30,8 +31,8 @@ const getWalletDetails = async (req, res) => {
     return res.status(200).json({
       success: true,
       wallet: {
-        walletBalance: user.walletBalance || 0,
-        rewardPoints: user.rewardPoints || 0,
+        walletBalance: getPointBalance(user),
+        rewardPoints: getPointBalance(user),
         signupBonusGranted: Boolean(user.signupBonusGranted),
       },
       transactions: recentTransactions,
@@ -86,8 +87,8 @@ const getWalletRewards = async (req, res) => {
     return res.status(200).json({
       success: true,
       wallet: {
-        walletBalance: user.walletBalance || 0,
-        rewardPoints: user.rewardPoints || 0,
+        walletBalance: getPointBalance(user),
+        rewardPoints: getPointBalance(user),
         signupBonusGranted: Boolean(user.signupBonusGranted),
       },
       transactions: transactions.map((tx) => ({
@@ -125,8 +126,8 @@ const redeemWalletPoints = async (req, res) => {
     return res.status(200).json({
       success: true,
       message: "Points redeemed successfully",
-      walletBalance: user?.walletBalance || 0,
-      rewardPoints: user?.rewardPoints || 0,
+      walletBalance: getPointBalance(user),
+      rewardPoints: getPointBalance(user),
     });
   } catch (error) {
     return res.status(400).json({

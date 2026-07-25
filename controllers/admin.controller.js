@@ -12,6 +12,7 @@ const Order = require("../models/order.model");
 const WalletTransaction = require("../models/walletTransaction.model");
 const AdminInfo = require("../models/adminInfo.model");
 const { sendPushToUsers } = require("../services/notification.service");
+const { syncPointBalance, getPointBalance } = require("../services/rewards.service");
 
 const buildOwnerProfile = () => ({
   id: "owner-nohar-001",
@@ -372,7 +373,7 @@ const promoteManualReward = async (req, res) => {
       { session },
     );
 
-    user.rewardPoints = Number(user.rewardPoints || 0) + normalizedPoints;
+    syncPointBalance(user, getPointBalance(user) + normalizedPoints);
     await user.save({ session });
 
     await session.commitTransaction();
@@ -399,8 +400,8 @@ const promoteManualReward = async (req, res) => {
             }
           : null,
         wallet: {
-          walletBalance: Number(user.walletBalance || 0),
-          rewardPoints: Number(user.rewardPoints || 0),
+          walletBalance: getPointBalance(user),
+          rewardPoints: getPointBalance(user),
         },
       },
     });
@@ -557,7 +558,7 @@ const updateRewardTransaction = async (req, res) => {
 
     const currentPoints = Number(transaction.points || 0);
     const pointDelta = Number((normalizedPoints - currentPoints).toFixed(2));
-    const nextRewardPoints = Number(user.rewardPoints || 0) + pointDelta;
+    const nextRewardPoints = getPointBalance(user) + pointDelta;
 
     if (nextRewardPoints < 0) {
       await session.abortTransaction();
@@ -571,7 +572,7 @@ const updateRewardTransaction = async (req, res) => {
     transaction.note = "Order reward updated by admin";
     await transaction.save({ session });
 
-    user.rewardPoints = nextRewardPoints;
+    syncPointBalance(user, nextRewardPoints);
     await user.save({ session });
 
     await session.commitTransaction();
@@ -596,7 +597,7 @@ const updateRewardTransaction = async (req, res) => {
                 : null,
             }
           : null,
-        rewardPoints: user.rewardPoints,
+        rewardPoints: getPointBalance(user),
       },
     });
   } catch (error) {

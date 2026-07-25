@@ -14,6 +14,28 @@ const REWARD_TRANSACTION_TYPES = [
   "ADJUSTMENT",
 ];
 
+const normalizePointValue = (value) => {
+  const numericValue = Number(value || 0);
+
+  return Number.isFinite(numericValue) ? Math.max(0, numericValue) : 0;
+};
+
+const getPointBalance = (user) =>
+  normalizePointValue(
+    user?.rewardPoints !== undefined && user?.rewardPoints !== null
+      ? user.rewardPoints
+      : user?.walletBalance,
+  );
+
+const syncPointBalance = (user, nextPoints) => {
+  const pointValue = normalizePointValue(nextPoints);
+
+  user.rewardPoints = pointValue;
+  user.walletBalance = pointValue;
+
+  return pointValue;
+};
+
 const addDays = (days) => {
   return new Date(Date.now() + days * 24 * 60 * 60 * 1000);
 };
@@ -48,12 +70,12 @@ const creditSignupBonus = async (userId) => {
     type: "SIGNUP_BONUS",
     amount: bonusAmount,
     points: 0,
-    note: "Welcome Wallet Bonus",
+    note: "Welcome Reward Points",
     expiresAt,
     status: "ACTIVE",
   });
 
-  user.walletBalance += bonusAmount;
+  syncPointBalance(user, getPointBalance(user) + bonusAmount);
   user.signupBonusGranted = true;
   await user.save();
 
@@ -86,11 +108,11 @@ const earnRewardPoints = async ({ userId, amount, orderId }) => {
     points,
     sourceOrder: orderId || null,
     note: "Reward points for order",
-    expiresAt: addMinutes(ORDER_REWARD_MATURITY_MINUTES),
-    status: "ACTIVE",
+    expiresAt: null,
+    status: "SETTLED",
   });
 
-  user.rewardPoints += points;
+  syncPointBalance(user, getPointBalance(user) + points);
   await user.save();
 
   return tx;
@@ -111,15 +133,14 @@ const redeemPoints = async ({ userId, points }) => {
     throw new Error("Insufficient reward points");
   }
 
-  user.rewardPoints = Math.max(0, Number(user.rewardPoints || 0) - redeemPointsValue);
-  user.walletBalance = Number(user.walletBalance || 0) + redeemPointsValue;
+  syncPointBalance(user, getPointBalance(user) - redeemPointsValue);
 
   const tx = await WalletTransaction.create({
     user: user._id,
     type: "REDEEM",
     points: redeemPointsValue,
     amount: redeemPointsValue,
-    note: "Redeem Reward Points",
+    note: "Redeemed reward points",
     status: "REDEEMED",
   });
   await user.save();
@@ -140,7 +161,10 @@ const expireSignupBonuses = async () => {
     await tx.save();
 
     await User.findByIdAndUpdate(tx.user, {
-      $inc: { walletBalance: -tx.amount },
+      $inc: {
+        rewardPoints: -tx.amount,
+        walletBalance: -tx.amount,
+      },
     });
   }
 
@@ -173,12 +197,10 @@ const settleMaturedOrderRewards = async () => {
       continue;
     }
 
-    user.rewardPoints = Math.max(0, Number(user.rewardPoints || 0) - points);
-    user.walletBalance = Number(user.walletBalance || 0) + points;
+    tx.status = "SETTLED";
+    tx.note = "Order reward settled";
     await user.save();
 
-    tx.status = "SETTLED";
-    tx.note = "Order reward moved to wallet";
     await tx.save();
   }
 
@@ -190,7 +212,9 @@ module.exports = {
   creditSignupBonus,
   calculateOrderRewardPoints,
   earnRewardPoints,
+  getPointBalance,
   redeemPoints,
   expireSignupBonuses,
+  syncPointBalance,
   settleMaturedOrderRewards,
 };
