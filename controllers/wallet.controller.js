@@ -6,6 +6,11 @@ const {
   settleMaturedOrderRewards,
 } = require("../services/rewards.service");
 
+const getTransactionPoints = (tx) =>
+  tx.type === "SIGNUP_BONUS"
+    ? Number(tx.points || tx.amount || 0)
+    : Number(tx.points || 0);
+
 const getWalletDetails = async (req, res) => {
   try {
     await settleMaturedOrderRewards();
@@ -35,7 +40,17 @@ const getWalletDetails = async (req, res) => {
         rewardPoints: getPointBalance(user),
         signupBonusGranted: Boolean(user.signupBonusGranted),
       },
-      transactions: recentTransactions,
+      transactions: recentTransactions.map((tx) => ({
+        ...tx,
+        points: getTransactionPoints(tx),
+        rawPoints: tx.points,
+        sourceOrder: tx.sourceOrder
+          ? {
+              ...tx.sourceOrder,
+              orderAmount: tx.sourceOrder.totalPrice,
+            }
+          : null,
+      })),
     });
   } catch (error) {
     return res.status(500).json({
@@ -93,6 +108,8 @@ const getWalletRewards = async (req, res) => {
       },
       transactions: transactions.map((tx) => ({
         ...tx,
+        points: getTransactionPoints(tx),
+        rawPoints: tx.points,
         sourceOrder: tx.sourceOrder
           ? {
               ...tx.sourceOrder,

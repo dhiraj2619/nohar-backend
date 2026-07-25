@@ -433,6 +433,11 @@ const getRewards = async (req, res) => {
       .limit(250)
       .lean();
 
+    const getTransactionPoints = (tx) =>
+      tx.type === "SIGNUP_BONUS"
+        ? Number(tx.points || tx.amount || 0)
+        : Number(tx.points || 0);
+
     const summary = transactions.reduce(
       (acc, tx) => {
         acc.totalTransactions += 1;
@@ -440,7 +445,7 @@ const getRewards = async (req, res) => {
         if (tx.type === "ORDER_REWARD") acc.orderRewards += 1;
         if (tx.type === "REDEEM") acc.redeems += 1;
         acc.totalAmount += Number(tx.amount || 0);
-        acc.totalPoints += Number(tx.points || 0);
+        acc.totalPoints += getTransactionPoints(tx);
         return acc;
       },
       {
@@ -466,7 +471,8 @@ const getRewards = async (req, res) => {
           _id: tx._id,
           type: tx.type,
           amount: tx.amount,
-          points: tx.points,
+          points: getTransactionPoints(tx),
+          rawPoints: tx.points,
           note: tx.note,
           status: tx.status,
           expiresAt: tx.expiresAt,
@@ -477,6 +483,9 @@ const getRewards = async (req, res) => {
                 fullName: tx.user.fullName,
                 email: tx.user.email,
                 phone: tx.user.phone,
+                rewardPoints: tx.user.rewardPoints,
+                walletBalance: tx.user.walletBalance,
+                signupBonusGranted: tx.user.signupBonusGranted,
               }
             : null,
           sourceOrder: tx.sourceOrder

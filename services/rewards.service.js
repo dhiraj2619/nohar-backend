@@ -69,7 +69,7 @@ const creditSignupBonus = async (userId) => {
     user: user._id,
     type: "SIGNUP_BONUS",
     amount: bonusAmount,
-    points: 0,
+    points: bonusAmount,
     note: "Welcome Reward Points",
     expiresAt,
     status: "ACTIVE",
