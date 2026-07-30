@@ -11,6 +11,7 @@ const User = require("../models/users.model");
 const Order = require("../models/order.model");
 const WalletTransaction = require("../models/walletTransaction.model");
 const AdminInfo = require("../models/adminInfo.model");
+const ShippingInfo = require("../models/shippingInfo.model");
 const { sendPushToUsers } = require("../services/notification.service");
 const { syncPointBalance, getPointBalance } = require("../services/rewards.service");
 
@@ -255,9 +256,15 @@ const getCustomers = async (req, res) => {
   try {
     const users = await User.find()
       .select(
-        "_id fullName email phone isActive fcmToken signupBonusGranted createdAt updatedAt",
+        "_id fullName email phone isActive fcmToken signupBonusGranted rewardPoints walletBalance createdAt updatedAt",
       )
       .sort({ createdAt: -1 });
+    const shippingDocs = await ShippingInfo.find({
+      user: { $in: users.map((user) => user._id) },
+    }).lean();
+    const shippingMap = new Map(
+      shippingDocs.map((doc) => [String(doc.user), doc]),
+    );
 
     const orderStats = await Order.aggregate([
       {
@@ -282,6 +289,11 @@ const getCustomers = async (req, res) => {
     const customers = users
       .map((user) => {
         const stats = statsMap.get(String(user._id)) || {};
+        const shippingDoc = shippingMap.get(String(user._id)) || null;
+        const defaultAddress =
+          shippingDoc?.addresses?.find((address) => address?.isDefault) ||
+          shippingDoc?.addresses?.[0] ||
+          null;
 
         return {
           _id: user._id,
@@ -292,6 +304,23 @@ const getCustomers = async (req, res) => {
           hasFcmToken: Boolean(String(user.fcmToken || "").trim()),
           signupBonusGranted: Boolean(user.signupBonusGranted),
           welcomeBonusGranted: Boolean(user.signupBonusGranted),
+          rewardPoints: Number(user.rewardPoints || 0),
+          walletBalance: Number(user.walletBalance || 0),
+          shippingInfo: defaultAddress
+            ? {
+                _id: defaultAddress._id,
+                flatNo: defaultAddress.flatNo,
+                area: defaultAddress.area,
+                landmark: defaultAddress.landmark,
+                city: defaultAddress.city,
+                state: defaultAddress.state,
+                pincode: defaultAddress.pincode,
+                country: defaultAddress.country,
+                mobile: defaultAddress.mobile,
+                type: defaultAddress.type,
+                isDefault: defaultAddress.isDefault,
+              }
+            : null,
           createdAt: user.createdAt,
           updatedAt: user.updatedAt,
           orderCount: stats.orderCount || 0,

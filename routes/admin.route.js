@@ -29,6 +29,7 @@ const {
 } = require("../controllers/payment.controller");
 const {
   advanceOrderPhase,
+  createAdminManualOrder,
   getAdminOrderDetails,
   getOrders,
   updateOrderStatus,
@@ -46,6 +47,7 @@ adminRouter.post("/customers/:customerId/manual-reward", isAdminAuth, promoteMan
 adminRouter.get("/rewards", isAdminAuth, getRewards);
 adminRouter.patch("/rewards/:transactionId", isAdminAuth, updateRewardTransaction);
 adminRouter.get("/orders", isAdminAuth, getOrders);
+adminRouter.post("/orders/manual", isAdminAuth, createAdminManualOrder);
 adminRouter.get("/payments", isAdminAuth, getPayments);
 adminRouter.post("/payments/sync-razorpay", isAdminAuth, syncRazorpayPayments);
 adminRouter.get("/orders/:orderId", isAdminAuth, getAdminOrderDetails);

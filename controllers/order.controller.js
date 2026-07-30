@@ -1142,6 +1142,299 @@ const runPostOrderTasks = ({ userId, order, customer, customerEmail }) => {
   });
 };
 
+const createAdminManualOrder = async (req, res) => {
+  const session = await mongoose.startSession();
+
+  try {
+    const {
+      customerId,
+      paymentDone,
+      totalOrderAmount,
+      amountPaid,
+      selectedProducts,
+      products,
+      orderItems,
+      addressId,
+    } = req.body;
+
+    const normalizedCustomerId = String(customerId || "").trim();
+    const normalizedPaymentDone = String(paymentDone || "FULL")
+      .trim()
+      .toUpperCase();
+    const incomingItems = Array.isArray(selectedProducts)
+      ? selectedProducts
+      : Array.isArray(products)
+        ? products
+        : Array.isArray(orderItems)
+          ? orderItems
+          : [];
+    const normalizedTotalOrderAmount = normalizeNumber(totalOrderAmount);
+    const normalizedAmountPaidInput = normalizeNumber(amountPaid);
+
+    if (!mongoose.Types.ObjectId.isValid(normalizedCustomerId)) {
+      return res.status(400).json({
+        success: false,
+        message: "Valid customer id is required",
+      });
+    }
+
+    if (!incomingItems.length) {
+      return res.status(400).json({
+        success: false,
+        message: "At least one product is required",
+      });
+    }
+
+    if (!["FULL", "PARTIAL"].includes(normalizedPaymentDone)) {
+      return res.status(400).json({
+        success: false,
+        message: "Payment done must be FULL or PARTIAL",
+      });
+    }
+
+    session.startTransaction();
+
+    const customer = await User.findById(normalizedCustomerId)
+      .select(
+        "_id fullName email phone fcmToken walletBalance rewardPoints signupBonusGranted",
+      )
+      .session(session);
+
+    if (!customer) {
+      await session.abortTransaction();
+      return res.status(404).json({
+        success: false,
+        message: "Customer not found",
+      });
+    }
+
+    const shippingInfo = await ShippingInfo.findOne({
+      user: customer._id,
+    }).session(session);
+
+    if (!shippingInfo) {
+      await session.abortTransaction();
+      return res.status(404).json({
+        success: false,
+        message: "Shipping info not found for this customer",
+      });
+    }
+
+    const selectedAddress = addressId
+      ? shippingInfo.addresses.find(
+          (address) => String(address._id) === String(addressId),
+        )
+      : shippingInfo.addresses.find((address) => address.isDefault) ||
+        shippingInfo.addresses[0];
+
+    if (!selectedAddress) {
+      await session.abortTransaction();
+      return res.status(400).json({
+        success: false,
+        message: "No valid shipping address found for this customer",
+      });
+    }
+
+    const productIds = [
+      ...new Set(
+        incomingItems
+          .map((item) => String(item?.productId || item?.product || "").trim())
+          .filter(Boolean),
+      ),
+    ];
+
+    if (!productIds.length) {
+      await session.abortTransaction();
+      return res.status(400).json({
+        success: false,
+        message: "Each product must include a valid product id",
+      });
+    }
+
+    const orderedProducts = await Product.find({ _id: { $in: productIds } })
+      .select(
+        "_id name price finalPrice discountprice images guideImage gstRate gst hsnCode insideStock",
+      )
+      .session(session)
+      .lean();
+
+    const productById = new Map(
+      orderedProducts.map((product) => [String(product._id), product]),
+    );
+
+    const missingProductIds = productIds.filter(
+      (productId) => !productById.has(productId),
+    );
+
+    if (missingProductIds.length > 0) {
+      await session.abortTransaction();
+      return res.status(400).json({
+        success: false,
+        message: "One or more products are unavailable",
+      });
+    }
+
+    const normalizedOrderItems = incomingItems.map((item) => {
+      const productId = String(item?.productId || item?.product || "").trim();
+      const quantity = Number(item?.quantity || 0);
+
+      if (!productId || !Number.isFinite(quantity) || quantity <= 0) {
+        return null;
+      }
+
+      return normalizeInvoiceItem(
+        {
+          ...item,
+          product: productId,
+          quantity,
+        },
+        productById.get(productId) || {},
+      );
+    }).filter(Boolean);
+
+    if (!normalizedOrderItems.length) {
+      await session.abortTransaction();
+      return res.status(400).json({
+        success: false,
+        message: "Valid product quantities are required",
+      });
+    }
+
+    const itemTotal = normalizedOrderItems.reduce(
+      (sum, item) =>
+        sum +
+        Number(item?.price || 0) * Number(item?.quantity || 0),
+      0,
+    );
+    const resolvedTotal =
+      normalizedTotalOrderAmount > 0
+        ? Number(normalizedTotalOrderAmount.toFixed(2))
+        : Number(itemTotal.toFixed(2));
+
+    if (!resolvedTotal || resolvedTotal <= 0) {
+      await session.abortTransaction();
+      return res.status(400).json({
+        success: false,
+        message: "Total order amount must be greater than 0",
+      });
+    }
+
+    let resolvedAmountPaid = Number.isFinite(normalizedAmountPaidInput)
+      ? Number(normalizedAmountPaidInput.toFixed(2))
+      : 0;
+    let resolvedPaymentStatus = "PENDING";
+    let resolvedPaymentMode =
+      normalizedPaymentDone === "PARTIAL" ? "PARTIAL_COD" : "FULL";
+    let resolvedPartialPercent = 0;
+    let resolvedAmountDue = 0;
+
+    if (normalizedPaymentDone === "FULL") {
+      if (resolvedAmountPaid <= 0) {
+        resolvedAmountPaid = resolvedTotal;
+      }
+
+      if (Math.abs(resolvedAmountPaid - resolvedTotal) > 0.01) {
+        await session.abortTransaction();
+        return res.status(400).json({
+          success: false,
+          message: "Amount paid must match total order amount for full payment",
+        });
+      }
+
+      resolvedPaymentStatus = "PAID";
+      resolvedAmountDue = 0;
+      resolvedPartialPercent = 100;
+    } else {
+      if (resolvedAmountPaid <= 0 || resolvedAmountPaid >= resolvedTotal) {
+        await session.abortTransaction();
+        return res.status(400).json({
+          success: false,
+          message: "Amount paid must be greater than 0 and less than total for partial payment",
+        });
+      }
+
+      resolvedPaymentStatus = "PARTIALLY_PAID";
+      resolvedAmountDue = Number((resolvedTotal - resolvedAmountPaid).toFixed(2));
+      resolvedPartialPercent = Number(
+        ((resolvedAmountPaid / resolvedTotal) * 100).toFixed(2),
+      );
+    }
+
+    const customerPointBalance = getPointBalance(customer);
+
+    const order = new Order({
+      user: customer._id,
+      shippingInfo: selectedAddress,
+      orderItems: normalizedOrderItems,
+      bookingSource: "website",
+      totalPrice: resolvedTotal,
+      originalTotalPrice: resolvedTotal,
+      pointsUsed: 0,
+      walletAmountUsed: 0,
+      walletAppliedAmount: 0,
+      walletBalanceUsed: 0,
+      walletBalanceBefore: customerPointBalance,
+      walletBalanceAfter: customerPointBalance,
+      orderStatus: "CANCELLED",
+      cancellationReason: "Failed order created by admin",
+      cancelledBy: "ADMIN",
+      cancelledAt: new Date(),
+      payment: null,
+      paymentMode: resolvedPaymentMode,
+      paymentStatus: resolvedPaymentStatus,
+      partialPercent: resolvedPartialPercent,
+      amountPaid: resolvedAmountPaid,
+      amountDue: resolvedAmountDue,
+      remainingPaymentMethod: resolvedPaymentMode === "PARTIAL_COD" ? "COD" : undefined,
+    });
+
+    await order.save({ session });
+
+    await session.commitTransaction();
+
+    const populatedOrder = await Order.findById(order._id).populate(
+      "user",
+      "_id fullName email phone",
+    );
+
+    return res.status(201).json({
+      success: true,
+      message: "Manual failed order created successfully",
+      order: populatedOrder || order,
+      customer: {
+        _id: customer._id,
+        fullName: customer.fullName,
+        email: customer.email,
+        phone: customer.phone,
+        rewardPoints: getPointBalance(customer),
+        shippingInfo: {
+          _id: selectedAddress._id,
+          flatNo: selectedAddress.flatNo,
+          area: selectedAddress.area,
+          landmark: selectedAddress.landmark,
+          city: selectedAddress.city,
+          state: selectedAddress.state,
+          pincode: selectedAddress.pincode,
+          country: selectedAddress.country,
+          mobile: selectedAddress.mobile,
+          type: selectedAddress.type,
+          isDefault: selectedAddress.isDefault,
+        },
+      },
+    });
+  } catch (error) {
+    await session.abortTransaction().catch(() => {});
+    console.error("Manual failed order creation failed:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to create manual order",
+      error: error.message,
+    });
+  } finally {
+    session.endSession();
+  }
+};
+
 const createOrder = async (req, res) => {
   const session = await mongoose.startSession();
 
@@ -1826,6 +2119,7 @@ const advanceOrderPhase = async (req, res) => {
 };
 
 module.exports = {
+  createAdminManualOrder,
   createOrder,
   cancelOrder,
   getOrders,
