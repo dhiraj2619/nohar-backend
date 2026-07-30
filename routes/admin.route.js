@@ -3,6 +3,7 @@ const {
   getCustomers,
   getRewards,
   promoteManualReward,
+  updateCustomerRewardBalance,
   updateRewardTransaction,
   loginAdmin,
 } = require("../controllers/admin.controller");
@@ -44,6 +45,7 @@ adminRouter.post("/login", loginAdmin);
 adminRouter.get("/owner", getOwnerAdmin);
 adminRouter.get("/customers", isAdminAuth, getCustomers);
 adminRouter.post("/customers/:customerId/manual-reward", isAdminAuth, promoteManualReward);
+adminRouter.patch("/customers/:customerId/reward-balance", isAdminAuth, updateCustomerRewardBalance);
 adminRouter.get("/rewards", isAdminAuth, getRewards);
 adminRouter.patch("/rewards/:transactionId", isAdminAuth, updateRewardTransaction);
 adminRouter.get("/orders", isAdminAuth, getOrders);

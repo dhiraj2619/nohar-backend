@@ -447,6 +447,97 @@ const promoteManualReward = async (req, res) => {
   }
 };
 
+const updateCustomerRewardBalance = async (req, res) => {
+  const session = await mongoose.startSession();
+
+  try {
+    const { customerId } = req.params;
+    const { balancePoints, note } = req.body;
+    const normalizedBalancePoints = Number(balancePoints);
+
+    if (!mongoose.Types.ObjectId.isValid(customerId)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid customer id",
+      });
+    }
+
+    if (!Number.isFinite(normalizedBalancePoints) || normalizedBalancePoints < 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Reward balance must be a valid non-negative number",
+      });
+    }
+
+    session.startTransaction();
+
+    const user = await User.findById(customerId).session(session);
+
+    if (!user) {
+      await session.abortTransaction();
+      return res.status(404).json({
+        success: false,
+        message: "Customer not found",
+      });
+    }
+
+    const currentBalance = getPointBalance(user);
+    const pointDelta = Number((normalizedBalancePoints - currentBalance).toFixed(2));
+    const adjustmentNote =
+      String(note || "").trim() ||
+      `Reward balance updated by admin from ${currentBalance} to ${normalizedBalancePoints}`;
+
+    if (pointDelta !== 0) {
+      await WalletTransaction.create(
+        [
+          {
+            user: user._id,
+            type: "ADJUSTMENT",
+            amount: 0,
+            points: pointDelta,
+            note: adjustmentNote,
+            status: "SETTLED",
+          },
+        ],
+        { session },
+      );
+    }
+
+    syncPointBalance(user, normalizedBalancePoints);
+    await user.save({ session });
+
+    await session.commitTransaction();
+
+    return res.status(200).json({
+      success: true,
+      message: "Reward balance updated successfully",
+      data: {
+        customer: {
+          _id: user._id,
+          fullName: user.fullName,
+          email: user.email,
+          phone: user.phone,
+          rewardPoints: getPointBalance(user),
+          walletBalance: getPointBalance(user),
+        },
+        previousPoints: currentBalance,
+        updatedPoints: pointDelta,
+        balancePoints: getPointBalance(user),
+      },
+    });
+  } catch (error) {
+    await session.abortTransaction().catch(() => {});
+    console.error("Error updating reward balance:", error);
+    return res.status(500).json({
+      success: false,
+      message: "An error occurred while updating reward balance",
+      error: error.message,
+    });
+  } finally {
+    session.endSession();
+  }
+};
+
 const getRewards = async (req, res) => {
   try {
     const settings = await AdminInfo.findOne()
@@ -659,5 +750,6 @@ module.exports = {
   getCustomers,
   getRewards,
   promoteManualReward,
+  updateCustomerRewardBalance,
   updateRewardTransaction,
 };
