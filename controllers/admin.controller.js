@@ -304,8 +304,8 @@ const getCustomers = async (req, res) => {
           hasFcmToken: Boolean(String(user.fcmToken || "").trim()),
           signupBonusGranted: Boolean(user.signupBonusGranted),
           welcomeBonusGranted: Boolean(user.signupBonusGranted),
-          rewardPoints: Number(user.rewardPoints || 0),
-          walletBalance: Number(user.walletBalance || 0),
+          rewardPoints: getPointBalance(user),
+          walletBalance: getPointBalance(user),
           shippingInfo: defaultAddress
             ? {
                 _id: defaultAddress._id,
