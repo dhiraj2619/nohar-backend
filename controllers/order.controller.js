@@ -1151,6 +1151,7 @@ const createAdminManualOrder = async (req, res) => {
       paymentDone,
       totalOrderAmount,
       amountPaid,
+      pointsUsed,
       selectedProducts,
       products,
       orderItems,
@@ -1170,6 +1171,7 @@ const createAdminManualOrder = async (req, res) => {
           : [];
     const normalizedTotalOrderAmount = normalizeNumber(totalOrderAmount);
     const normalizedAmountPaidInput = normalizeNumber(amountPaid);
+    const normalizedPointsUsedInput = normalizeNumber(pointsUsed);
 
     if (!mongoose.Types.ObjectId.isValid(normalizedCustomerId)) {
       return res.status(400).json({
@@ -1361,6 +1363,26 @@ const createAdminManualOrder = async (req, res) => {
     }
 
     const customerPointBalance = getPointBalance(customer);
+    const pointsToUse =
+      Number.isFinite(normalizedPointsUsedInput) && normalizedPointsUsedInput > 0
+        ? Number(normalizedPointsUsedInput.toFixed(2))
+        : 0;
+
+    if (pointsToUse > customerPointBalance) {
+      await session.abortTransaction();
+      return res.status(400).json({
+        success: false,
+        message: "Points used cannot exceed available reward balance",
+      });
+    }
+
+    if (pointsToUse > resolvedTotal) {
+      await session.abortTransaction();
+      return res.status(400).json({
+        success: false,
+        message: "Points used cannot exceed total order amount",
+      });
+    }
 
     const order = new Order({
       user: customer._id,
@@ -1369,12 +1391,12 @@ const createAdminManualOrder = async (req, res) => {
       bookingSource: "website",
       totalPrice: resolvedTotal,
       originalTotalPrice: resolvedTotal,
-      pointsUsed: 0,
-      walletAmountUsed: 0,
-      walletAppliedAmount: 0,
-      walletBalanceUsed: 0,
+      pointsUsed: pointsToUse,
+      walletAmountUsed: pointsToUse,
+      walletAppliedAmount: pointsToUse,
+      walletBalanceUsed: pointsToUse,
       walletBalanceBefore: customerPointBalance,
-      walletBalanceAfter: customerPointBalance,
+      walletBalanceAfter: Math.max(customerPointBalance - pointsToUse, 0),
       orderStatus: "CANCELLED",
       cancellationReason: "Failed order created by admin",
       cancelledBy: "ADMIN",
@@ -1389,6 +1411,26 @@ const createAdminManualOrder = async (req, res) => {
     });
 
     await order.save({ session });
+
+    if (pointsToUse > 0) {
+      await WalletTransaction.create(
+        [
+          {
+            user: customer._id,
+            type: "REDEEM",
+            amount: pointsToUse,
+            points: pointsToUse,
+            sourceOrder: order._id,
+            note: "Reward points used in admin manual order",
+            status: "REDEEMED",
+          },
+        ],
+        { session },
+      );
+
+      syncPointBalance(customer, customerPointBalance - pointsToUse);
+      await customer.save({ session });
+    }
 
     await session.commitTransaction();
 
@@ -1407,6 +1449,9 @@ const createAdminManualOrder = async (req, res) => {
         email: customer.email,
         phone: customer.phone,
         rewardPoints: getPointBalance(customer),
+        previousPoints: customerPointBalance,
+        updatedPoints: pointsToUse,
+        balancePoints: getPointBalance(customer),
         shippingInfo: {
           _id: selectedAddress._id,
           flatNo: selectedAddress.flatNo,
