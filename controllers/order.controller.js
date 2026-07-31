@@ -1,4 +1,4 @@
-﻿const nodemailer = require("nodemailer");
+const nodemailer = require("nodemailer");
 const fs = require("fs");
 const path = require("path");
 const PDFDocument = require("pdfkit");
@@ -1324,13 +1324,18 @@ const createAdminManualOrder = async (req, res) => {
     let resolvedAmountPaid = Number.isFinite(normalizedAmountPaidInput)
       ? Number(normalizedAmountPaidInput.toFixed(2))
       : 0;
+    const shouldTreatAsPartial =
+      normalizedPaymentDone === "PARTIAL" ||
+      (Number.isFinite(normalizedAmountPaidInput) &&
+        normalizedAmountPaidInput > 0 &&
+        normalizedAmountPaidInput < resolvedTotal);
+
     let resolvedPaymentStatus = "PENDING";
-    let resolvedPaymentMode =
-      normalizedPaymentDone === "PARTIAL" ? "PARTIAL_COD" : "FULL";
+    let resolvedPaymentMode = shouldTreatAsPartial ? "PARTIAL_COD" : "FULL";
     let resolvedPartialPercent = 0;
     let resolvedAmountDue = 0;
 
-    if (normalizedPaymentDone === "FULL") {
+    if (!shouldTreatAsPartial) {
       if (resolvedAmountPaid <= 0) {
         resolvedAmountPaid = resolvedTotal;
       }
@@ -1389,6 +1394,7 @@ const createAdminManualOrder = async (req, res) => {
       shippingInfo: selectedAddress,
       orderItems: normalizedOrderItems,
       bookingSource: "website",
+      adminOrderType: "MANUAL",
       totalPrice: resolvedTotal,
       originalTotalPrice: resolvedTotal,
       pointsUsed: pointsToUse,
@@ -1397,10 +1403,7 @@ const createAdminManualOrder = async (req, res) => {
       walletBalanceUsed: pointsToUse,
       walletBalanceBefore: customerPointBalance,
       walletBalanceAfter: Math.max(customerPointBalance - pointsToUse, 0),
-      orderStatus: "CANCELLED",
-      cancellationReason: "Failed order created by admin",
-      cancelledBy: "ADMIN",
-      cancelledAt: new Date(),
+      orderStatus: "ORDER_PLACED",
       payment: null,
       paymentMode: resolvedPaymentMode,
       paymentStatus: resolvedPaymentStatus,
@@ -2078,10 +2081,12 @@ const updateOrderStatus = async (req, res) => {
       order.cancellationReason = normalizedReason;
       order.cancelledAt = new Date();
       order.cancelledBy = "ADMIN";
+      order.adminOrderType = "FAILED";
     } else {
       order.cancellationReason = null;
       order.cancelledAt = null;
       order.cancelledBy = null;
+      order.adminOrderType = null;
       applyOrderStatusSideEffects(order, normalizedStatus);
     }
 
@@ -2163,6 +2168,97 @@ const advanceOrderPhase = async (req, res) => {
   }
 };
 
+const deleteAdminManualOrder = async (req, res) => {
+  const session = await mongoose.startSession();
+
+  try {
+    const { orderId } = req.params;
+
+    if (!mongoose.Types.ObjectId.isValid(orderId)) {
+      return res.status(400).json({
+        success: false,
+        message: "Valid order id is required",
+      });
+    }
+
+    session.startTransaction();
+
+    const order = await Order.findById(orderId).session(session);
+
+    if (!order) {
+      await session.abortTransaction();
+      return res.status(404).json({
+        success: false,
+        message: "Order not found",
+      });
+    }
+
+    if (String(order.adminOrderType || "").trim().toUpperCase() !== "MANUAL") {
+      await session.abortTransaction();
+      return res.status(403).json({
+        success: false,
+        message: "Only admin manual orders can be deleted",
+      });
+    }
+
+    const customer = await User.findById(order.user).session(session);
+
+    if (!customer) {
+      await session.abortTransaction();
+      return res.status(404).json({
+        success: false,
+        message: "Customer not found for this order",
+      });
+    }
+
+    const pointsUsed = Number(
+      order.pointsUsed ||
+        order.walletAmountUsed ||
+        order.walletAppliedAmount ||
+        order.walletBalanceUsed ||
+        0,
+    );
+
+    if (pointsUsed > 0) {
+      const restoredBalance = getPointBalance(customer) + pointsUsed;
+      syncPointBalance(customer, restoredBalance);
+
+      await WalletTransaction.create(
+        [
+          {
+            user: customer._id,
+            type: "ADJUSTMENT",
+            amount: pointsUsed,
+            points: pointsUsed,
+            note: "Reward points restored after admin manual order deletion",
+            sourceOrder: order._id,
+            status: "SETTLED",
+          },
+        ],
+        { session },
+      );
+
+      await customer.save({ session });
+    }
+
+    await Order.deleteOne({ _id: order._id }).session(session);
+    await session.commitTransaction();
+
+    return res.status(200).json({
+      success: true,
+      message: "Manual order deleted successfully",
+    });
+  } catch (error) {
+    await session.abortTransaction().catch(() => {});
+    return res.status(500).json({
+      success: false,
+      message: "Failed to delete manual order",
+      error: error.message,
+    });
+  } finally {
+    session.endSession();
+  }
+};
 module.exports = {
   createAdminManualOrder,
   createOrder,
@@ -2173,4 +2269,6 @@ module.exports = {
   downloadOrderInvoice,
   updateOrderStatus,
   advanceOrderPhase,
+  deleteAdminManualOrder,
 };
+

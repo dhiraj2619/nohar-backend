@@ -1,4 +1,4 @@
-﻿const mongoose = require("mongoose");
+const mongoose = require("mongoose");
 
 const orderItemSchema = new mongoose.Schema(
   {
@@ -98,6 +98,11 @@ const orderSchema = new mongoose.Schema(
       type: String,
       enum: ["website", "app"],
       default: "app",
+    },
+    adminOrderType: {
+      type: String,
+      enum: ["MANUAL", "FAILED"],
+      default: null,
     },
     payment: {
       type: mongoose.Schema.ObjectId,

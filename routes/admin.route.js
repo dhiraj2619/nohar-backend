@@ -31,6 +31,7 @@ const {
 const {
   advanceOrderPhase,
   createAdminManualOrder,
+  deleteAdminManualOrder,
   getAdminOrderDetails,
   getOrders,
   updateOrderStatus,
@@ -55,6 +56,7 @@ adminRouter.post("/payments/sync-razorpay", isAdminAuth, syncRazorpayPayments);
 adminRouter.get("/orders/:orderId", isAdminAuth, getAdminOrderDetails);
 adminRouter.patch("/orders/:orderId/next-phase", isAdminAuth, advanceOrderPhase);
 adminRouter.patch("/orders/:orderId/status", isAdminAuth, updateOrderStatus);
+adminRouter.delete("/orders/:orderId", isAdminAuth, deleteAdminManualOrder);
 adminRouter.patch("/products/:id/most-buy", isAdminAuth, updateMostBuyStatus);
 adminRouter.get("/public-settings", getPublicSettings);
 adminRouter.get("/settings", isAdminAuth, getSettings);
