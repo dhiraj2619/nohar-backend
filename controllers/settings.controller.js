@@ -70,6 +70,19 @@ const buildPublicSettingsPayload = (settings) => ({
     settings?.freeShippingAbove !== null
       ? Number(settings.freeShippingAbove)
       : 0,
+  ordersAcceptedAbove:
+    settings?.ordersAcceptedAbove !== undefined &&
+    settings?.ordersAcceptedAbove !== null
+      ? Number(settings.ordersAcceptedAbove)
+      : settings?.freeShippingAbove !== undefined &&
+          settings?.freeShippingAbove !== null
+        ? Number(settings.freeShippingAbove)
+        : 0,
+  shippingCharges:
+    settings?.shippingCharges !== undefined &&
+    settings?.shippingCharges !== null
+      ? Number(settings.shippingCharges)
+      : 0,
   newCustomerWelcomeBonus:
     settings?.newCustomerWelcomeBonus !== undefined &&
     settings?.newCustomerWelcomeBonus !== null
@@ -154,6 +167,8 @@ const updateSettings = async (req, res) => {
       partialPaymentType,
       partialPaymentValue,
       freeShippingAbove,
+      ordersAcceptedAbove,
+      shippingCharges,
       newCustomerWelcomeBonus,
       orderRewardDefault,
       removeAuthorizedSignatory,
@@ -201,6 +216,19 @@ const updateSettings = async (req, res) => {
       settings.freeShippingAbove = Number.isNaN(normalizedFreeShippingAbove)
         ? settings.freeShippingAbove
         : normalizedFreeShippingAbove;
+    }
+    if (ordersAcceptedAbove !== undefined) {
+      const normalizedOrdersAcceptedAbove = Number(ordersAcceptedAbove);
+      if (!Number.isNaN(normalizedOrdersAcceptedAbove)) {
+        settings.ordersAcceptedAbove = normalizedOrdersAcceptedAbove;
+        settings.freeShippingAbove = normalizedOrdersAcceptedAbove;
+      }
+    }
+    if (shippingCharges !== undefined) {
+      const normalizedShippingCharges = Number(shippingCharges);
+      settings.shippingCharges = Number.isNaN(normalizedShippingCharges)
+        ? settings.shippingCharges
+        : normalizedShippingCharges;
     }
     if (newCustomerWelcomeBonus !== undefined) {
       const normalizedWelcomeBonus = Number(newCustomerWelcomeBonus);

@@ -68,6 +68,16 @@ const adminInfoSchema = new mongoose.Schema(
       default: 0,
       min: 0,
     },
+    ordersAcceptedAbove: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    shippingCharges: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
     newCustomerWelcomeBonus: {
       type: Number,
       default: 50,

@@ -49,6 +49,8 @@ const DEFAULT_STORE_DETAILS = {
   partialPaymentType: "PERCENT",
   partialPaymentValue: 0,
   freeShippingAbove: 0,
+  ordersAcceptedAbove: 0,
+  shippingCharges: 0,
   maintenanceMode: false,
 };
 
@@ -310,6 +312,14 @@ const getStoreDetails = async () => {
     partialPaymentValue: hasNumberValue(settings?.partialPaymentValue)
       ? Number(settings.partialPaymentValue)
       : DEFAULT_STORE_DETAILS.partialPaymentValue,
+    ordersAcceptedAbove: hasNumberValue(settings?.ordersAcceptedAbove)
+      ? Number(settings.ordersAcceptedAbove)
+      : hasNumberValue(settings?.freeShippingAbove)
+        ? Number(settings.freeShippingAbove)
+        : DEFAULT_STORE_DETAILS.ordersAcceptedAbove,
+    shippingCharges: hasNumberValue(settings?.shippingCharges)
+      ? Number(settings.shippingCharges)
+      : DEFAULT_STORE_DETAILS.shippingCharges,
     freeShippingAbove: hasNumberValue(settings?.freeShippingAbove)
       ? Number(settings.freeShippingAbove)
       : DEFAULT_STORE_DETAILS.freeShippingAbove,
@@ -627,13 +637,25 @@ const buildInvoicePdf = async ({ order, customer, res }) => {
     return sum + (quantity * price * gstRate) / 100;
   }, 0);
   const totalAmount = normalizeCurrencyValue(order?.totalPrice || itemTotal);
-  const shippingCharge = Number((totalAmount - itemTotal).toFixed(2));
-  const freeShippingThreshold =
-    normalizeCurrencyValue(storeDetails?.freeShippingAbove) > 0
-      ? normalizeCurrencyValue(storeDetails.freeShippingAbove)
-      : 499;
+  const shippingThreshold =
+    normalizeCurrencyValue(storeDetails?.ordersAcceptedAbove) > 0
+      ? normalizeCurrencyValue(storeDetails.ordersAcceptedAbove)
+      : normalizeCurrencyValue(storeDetails?.freeShippingAbove) > 0
+        ? normalizeCurrencyValue(storeDetails.freeShippingAbove)
+        : 499;
+  const configuredShippingCharge =
+    normalizeCurrencyValue(storeDetails?.shippingCharges) > 0
+      ? normalizeCurrencyValue(storeDetails.shippingCharges)
+      : 0;
+  const shippingChargeFromOrder = Number((totalAmount - itemTotal).toFixed(2));
+  const shippingCharge =
+    shippingChargeFromOrder > 0
+      ? shippingChargeFromOrder
+      : normalizeCurrencyValue(itemTotal) < shippingThreshold
+        ? configuredShippingCharge
+        : 0;
   const shouldShowShippingRow =
-    normalizeCurrencyValue(itemTotal) < freeShippingThreshold ||
+    normalizeCurrencyValue(itemTotal) < shippingThreshold ||
     shippingCharge > 0;
   const paymentLabel =
     order?.paymentMode === "PARTIAL_COD"
