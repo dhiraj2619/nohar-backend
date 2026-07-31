@@ -4,28 +4,20 @@ const {
   BREVO_SENDER_EMAIL,
   BREVO_SENDER_NAME,
   ORDER_OWNER_EMAIL,
-  OTP_API_KEY,
-  OTP_CAMPAIGN,
+  FAST2SMS_API_KEY,
   OTP_ROUTE,
   OTP_SENDER_ID,
   OTP_TEMPLATE_ID,
-  OTP_PE_ID,
-  ANDROID_APP_SIGNATURE,
 } = require("../config/config");
 const Otp = require("../models/otp.model");
 const User = require("../models/users.model");
 const { creditSignupBonus, getPointBalance } = require("../services/rewards.service");
 
 const generateOTP = () => Math.floor(100000 + Math.random() * 900000);
-const DEFAULT_OTP_APP_SIGNATURE = "jLC652FxiEr";
 const normalizeEmail = (value) => String(value || "").trim();
 const normalizePhone = (value) => {
   const digits = String(value || "").replace(/\D/g, "");
   return digits.length > 10 ? digits.slice(-10) : digits;
-};
-const normalizeAppSignature = (value) => {
-  const signature = String(value || "").trim();
-  return /^[A-Za-z0-9+/]{11}$/.test(signature) ? signature : "";
 };
 const maskPhone = (value) => {
   const digits = normalizePhone(value);
@@ -170,19 +162,13 @@ const sendOTP = async (req, res) => {
     .slice(2, 8)}`;
 
   try {
-    const { phone, appSignature } = req.body;
+    const { phone } = req.body;
     const cleanPhone = normalizePhone(phone);
-    const appProvidedSignature = normalizeAppSignature(appSignature);
-    const envProvidedSignature = normalizeAppSignature(
-      ANDROID_APP_SIGNATURE || DEFAULT_OTP_APP_SIGNATURE,
-    );
 
     console.info("[OTP][send:start]", {
       requestId,
       phone: maskPhone(cleanPhone),
       rawPhoneLength: String(phone || "").length,
-      hasAppSignature: Boolean(appProvidedSignature),
-      hasEnvSignature: Boolean(envProvidedSignature),
     });
 
     if (!cleanPhone) {
@@ -212,35 +198,46 @@ const sendOTP = async (req, res) => {
 
     const otp = generateOTP();
     const otpExpiry = new Date(Date.now() + 10 * 60 * 1000); // OTP valid for 10 minutes
-    const androidAppSignature = appProvidedSignature || envProvidedSignature;
+    const apiKey = FAST2SMS_API_KEY;
 
-    console.info("[OTP][send:signature]", {
+    if (!apiKey) {
+      console.error("[OTP][send:missing_api_key]", {
+        requestId,
+        phone: maskPhone(cleanPhone),
+      });
+
+      return res.status(500).json({
+        success: false,
+        message: "OTP service is not configured",
+      });
+    }
+
+    const normalizedSenderId = String(OTP_SENDER_ID || "NOHARS").trim();
+    const normalizedTemplateId = String(OTP_TEMPLATE_ID || "").trim();
+    const normalizedRoute = String(OTP_ROUTE || "dlt").trim().toLowerCase();
+    const variablesValues = `${otp}|`;
+
+    console.info("[OTP][send:provider_request]", {
       requestId,
       phone: maskPhone(cleanPhone),
-      signatureSource: appProvidedSignature
-        ? "app"
-        : envProvidedSignature
-          ? "env"
-          : "none",
+      route: normalizedRoute,
+      senderId: normalizedSenderId,
+      templateId: normalizedTemplateId,
     });
 
-    const msg = `Dear Customer Your Nohar cosmetics login OTP is ${otp} It will expire in next 10 mins. Please do not share code with anyone.${androidAppSignature}`;
-
-    const url = `https://kutility.org/app/smsapi/index.php?key=${OTP_API_KEY}&campaign=${OTP_CAMPAIGN}&routeid=${OTP_ROUTE}&type=text&contacts=${cleanPhone}&senderid=${OTP_SENDER_ID}&msg=${encodeURIComponent(msg)}&template_id=${OTP_TEMPLATE_ID}&pe_id=${OTP_PE_ID}`;
-
-    console.info("[OTP][send:vendor_request]", {
-      requestId,
-      phone: maskPhone(cleanPhone),
-      campaignConfigured: Boolean(OTP_CAMPAIGN),
-      routeConfigured: Boolean(OTP_ROUTE),
-      senderConfigured: Boolean(OTP_SENDER_ID),
-      templateConfigured: Boolean(OTP_TEMPLATE_ID),
-      peConfigured: Boolean(OTP_PE_ID),
+    const response = await axios.get("https://www.fast2sms.com/dev/bulkV2", {
+      timeout: 20000,
+      params: {
+        authorization: apiKey,
+        route: normalizedRoute || "dlt",
+        sender_id: normalizedSenderId,
+        message: normalizedTemplateId,
+        variables_values: variablesValues,
+        numbers: cleanPhone,
+      },
     });
 
-    const response = await axios.get(url, { timeout: 20000 });
-
-    console.info("[OTP][send:vendor_response]", {
+    console.info("[OTP][send:provider_response]", {
       requestId,
       phone: maskPhone(cleanPhone),
       status: response?.status,
@@ -249,7 +246,7 @@ const sendOTP = async (req, res) => {
     });
 
     if (!response?.data) {
-      console.error("[OTP][send:vendor_invalid_response]", {
+      console.error("[OTP][send:provider_invalid_response]", {
         requestId,
         phone: maskPhone(cleanPhone),
         status: response?.status,

@@ -7,7 +7,7 @@ const ADMIN_EMAIL = process.env.ADMIN_EMAIL;
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD;
 const ADMIN_JWT_SECRET = process.env.ADMIN_JWT_SECRET;
 const ADMIN_NAME = process.env.ADMIN_NAME;
-const OTP_API_KEY = process.env.OTP_API_KEY;
+const FAST2SMS_API_KEY = process.env.FAST2SMS_API_KEY || process.env.OTP_API_KEY;
 const OTP_CAMPAIGN = process.env.OTP_CAMPAIGN;
 const OTP_PE_ID = process.env.OTP_PE_ID;
 const OTP_ROUTE = process.env.OTP_ROUTE;
@@ -36,7 +36,7 @@ module.exports = {
   ADMIN_PASSWORD,
   ADMIN_JWT_SECRET,
   ADMIN_NAME,
-  OTP_API_KEY,
+  FAST2SMS_API_KEY,
   OTP_CAMPAIGN,
   OTP_PE_ID,
   OTP_ROUTE,
