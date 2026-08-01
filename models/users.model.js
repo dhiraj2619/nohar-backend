@@ -16,16 +16,25 @@ const userSchema = new mongoose.Schema(
       unique: true,
       sparse: true,
     },
+    googleId: {
+      type: String,
+      trim: true,
+      unique: true,
+      sparse: true,
+      default: undefined,
+    },
     phone: {
       type: String,
-      required: true,
+      required: false,
       unique: true,
+      sparse: true,
       index: true,
       trim: true,
+      default: undefined,
     },
     loginType: {
       type: String,
-      enum: ["otp"],
+      enum: ["otp", "google"],
       default: "otp",
       required: true,
     },
@@ -75,6 +84,7 @@ userSchema.pre("save", function normalizeUserFields() {
   if (this.email === "" || this.email === null) this.email = undefined;
   if (this.fullName === "") this.fullName = null;
   if (this.phone) this.phone = this.phone.trim();
+  if (this.googleId === "" || this.googleId === null) this.googleId = undefined;
 });
 
 const User = mongoose.model("User", userSchema);

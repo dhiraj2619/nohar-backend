@@ -1,10 +1,15 @@
 const { default: axios } = require("axios");
+const { OAuth2Client } = require("google-auth-library");
 const {
   BREVO_API_KEY,
   BREVO_SENDER_EMAIL,
   BREVO_SENDER_NAME,
   ORDER_OWNER_EMAIL,
   FAST2SMS_API_KEY,
+  FAST2SMS_OTP_ID,
+  GOOGLE_WEB_CLIENT_ID,
+  GOOGLE_ANDROID_CLIENT_ID,
+  GOOGLE_CLIENT_IDS,
   OTP_ROUTE,
   OTP_SENDER_ID,
   OTP_TEMPLATE_ID,
@@ -13,12 +18,23 @@ const Otp = require("../models/otp.model");
 const User = require("../models/users.model");
 const { creditSignupBonus, getPointBalance } = require("../services/rewards.service");
 
+const googleClient = new OAuth2Client();
+
 const generateOTP = () => Math.floor(100000 + Math.random() * 900000);
 const normalizeEmail = (value) => String(value || "").trim();
 const normalizePhone = (value) => {
   const digits = String(value || "").replace(/\D/g, "");
   return digits.length > 10 ? digits.slice(-10) : digits;
 };
+const parseGoogleClientIds = () =>
+  [
+    GOOGLE_WEB_CLIENT_ID,
+    GOOGLE_ANDROID_CLIENT_ID,
+    ...(String(GOOGLE_CLIENT_IDS || "")
+      .split(",")
+      .map((value) => value.trim())
+      .filter(Boolean)),
+  ].filter(Boolean);
 const maskPhone = (value) => {
   const digits = normalizePhone(value);
 
@@ -49,6 +65,112 @@ const formatCurrency = (amount) => {
   const numericAmount = Number(amount || 0);
   return `Rs. ${numericAmount.toFixed(2)}`;
 };
+
+const buildUserAuthResponse = (user) => ({
+  _id: user._id,
+  phone: user.phone || null,
+  fullName: user.fullName || null,
+  email: user.email || null,
+  profileImage: user.profileImage || null,
+  loginType: user.loginType,
+  profileCompleted: Boolean(user.profileCompleted),
+  walletBalance: getPointBalance(user),
+  rewardPoints: getPointBalance(user),
+  signupBonusGranted: Boolean(user.signupBonusGranted),
+});
+
+const OTP_WINDOW_MS = 10 * 60 * 1000;
+const OTP_SEND_COOLDOWN_MS = 60 * 1000;
+const OTP_MAX_TOTAL_ATTEMPTS = 5;
+
+const getOtpWindowStart = (otpSession) =>
+  otpSession?.firstSentAt ? new Date(otpSession.firstSentAt) : null;
+
+const isOtpWindowExpired = (otpSession) => {
+  const firstSentAt = getOtpWindowStart(otpSession);
+  if (!firstSentAt) {
+    return false;
+  }
+
+  return Date.now() - firstSentAt.getTime() > OTP_WINDOW_MS;
+};
+
+const resetOtpWindow = (otpSession, now = new Date()) => {
+  otpSession.firstSentAt = now;
+  otpSession.lastSentAt = now;
+  otpSession.resendCount = 0;
+  otpSession.sendCount = 0;
+  otpSession.status = "pending";
+  otpSession.otp = null;
+  otpSession.otpExpiry = new Date(now.getTime() + OTP_WINDOW_MS);
+  otpSession.providerRequestId = null;
+};
+
+const normalizeFast2SmsError = (error) => {
+  const status = error?.response?.status;
+  const data = error?.response?.data;
+  const message =
+    data?.message ||
+    data?.error ||
+    error?.message ||
+    "OTP provider request failed";
+
+  return {
+    status,
+    data,
+    message,
+  };
+};
+
+const callFast2SmsOtpSend = async (mobile) =>
+  axios.post(
+    "https://www.fast2sms.com/dev/otp/send",
+    {
+      mobile,
+      otp_id: String(FAST2SMS_OTP_ID || "").trim(),
+    },
+    {
+      timeout: 20000,
+      headers: {
+        accept: "application/json",
+        Authorization: FAST2SMS_API_KEY,
+        "content-type": "application/json",
+      },
+    },
+  );
+
+const callFast2SmsOtpResend = async (mobile) =>
+  axios.post(
+    "https://www.fast2sms.com/dev/otp/resend",
+    {
+      mobile,
+    },
+    {
+      timeout: 20000,
+      headers: {
+        accept: "application/json",
+        Authorization: FAST2SMS_API_KEY,
+        "content-type": "application/json",
+      },
+    },
+  );
+
+const callFast2SmsOtpVerify = async (mobile, otp) =>
+  axios.post(
+    "https://www.fast2sms.com/dev/otp/verify",
+    {
+      mobile,
+      otp,
+    },
+    {
+      timeout: 20000,
+      headers: {
+        accept: "application/json",
+        Authorization: FAST2SMS_API_KEY,
+        "content-type": "application/json",
+      },
+    },
+  );
 
 const escapeHtml = (value) =>
   String(value || "")
@@ -156,27 +278,11 @@ const sendBrevoEmail = async ({ to, subject, text, html }) => {
 };
 
 const sendOTP = async (req, res) => {
-  const requestStartedAt = Date.now();
-  const requestId = `otp-${requestStartedAt}-${Math.random()
-    .toString(36)
-    .slice(2, 8)}`;
-
   try {
     const { phone } = req.body;
     const cleanPhone = normalizePhone(phone);
 
-    console.info("[OTP][send:start]", {
-      requestId,
-      phone: maskPhone(cleanPhone),
-      rawPhoneLength: String(phone || "").length,
-    });
-
     if (!cleanPhone) {
-      console.warn("[OTP][send:validation_failed]", {
-        requestId,
-        reason: "missing_phone",
-      });
-
       return res.status(400).json({
         success: false,
         message: "Phone number is required",
@@ -196,101 +302,202 @@ const sendOTP = async (req, res) => {
       });
     }
 
-    const otp = generateOTP();
-    const otpExpiry = new Date(Date.now() + 10 * 60 * 1000); // OTP valid for 10 minutes
-    const apiKey = FAST2SMS_API_KEY;
-
-    if (!apiKey) {
-      console.error("[OTP][send:missing_api_key]", {
-        requestId,
-        phone: maskPhone(cleanPhone),
-      });
-
+    if (!FAST2SMS_API_KEY || !FAST2SMS_OTP_ID) {
       return res.status(500).json({
         success: false,
         message: "OTP service is not configured",
       });
     }
 
-    const normalizedSenderId = String(OTP_SENDER_ID || "NOHARS").trim();
-    const normalizedTemplateId = String(OTP_TEMPLATE_ID || "").trim();
-    const normalizedRoute = String(OTP_ROUTE || "dlt").trim().toLowerCase();
-    const variablesValues = `${otp}|`;
+    const now = new Date();
+    let otpSession = await Otp.findOne({ phone: cleanPhone });
 
-    console.info("[OTP][send:provider_request]", {
-      requestId,
-      phone: maskPhone(cleanPhone),
-      route: normalizedRoute,
-      senderId: normalizedSenderId,
-      templateId: normalizedTemplateId,
-    });
+    if (otpSession && isOtpWindowExpired(otpSession)) {
+      otpSession.status = "expired";
+      await otpSession.save();
+      otpSession = null;
+    }
 
-    const response = await axios.get("https://www.fast2sms.com/dev/bulkV2", {
-      timeout: 20000,
-      params: {
-        authorization: apiKey,
-        route: normalizedRoute || "dlt",
-        sender_id: normalizedSenderId,
-        message: normalizedTemplateId,
-        variables_values: variablesValues,
-        numbers: cleanPhone,
-      },
-    });
+    if (otpSession?.status === "pending" && otpSession.lastSentAt) {
+      const cooldownElapsed = now.getTime() - new Date(otpSession.lastSentAt).getTime();
 
-    console.info("[OTP][send:provider_response]", {
-      requestId,
-      phone: maskPhone(cleanPhone),
-      status: response?.status,
-      data: summarizeVendorResponse(response?.data),
-      durationMs: Date.now() - requestStartedAt,
-    });
+      if (cooldownElapsed < OTP_SEND_COOLDOWN_MS) {
+        return res.status(429).json({
+          success: false,
+          message: "Please wait before requesting another OTP",
+        });
+      }
+    }
 
-    if (!response?.data) {
-      console.error("[OTP][send:provider_invalid_response]", {
-        requestId,
-        phone: maskPhone(cleanPhone),
-        status: response?.status,
-        durationMs: Date.now() - requestStartedAt,
-      });
-
-      return res.status(502).json({
-        success: false,
-        message: "SMS vendor did not return a valid response",
+    if (!otpSession) {
+      otpSession = new Otp({
+        phone: cleanPhone,
+        firstSentAt: now,
+        lastSentAt: null,
+        resendCount: 0,
+        sendCount: 0,
+        status: "pending",
       });
     }
 
-    const otpRecord = await Otp.findOneAndUpdate(
-      { phone: cleanPhone },
-      { otp, otpExpiry },
-      { upsert: true, returnDocument: "after", setDefaultsOnInsert: true },
-    );
+    if ((otpSession.sendCount || 0) >= OTP_MAX_TOTAL_ATTEMPTS) {
+      return res.status(429).json({
+        success: false,
+        message: "OTP limit reached. Please try again later.",
+      });
+    }
 
-    console.info("[OTP][send:stored]", {
-      requestId,
-      phone: maskPhone(cleanPhone),
-      otpRecordId: otpRecord?._id,
-      durationMs: Date.now() - requestStartedAt,
-    });
+    if (!otpSession.firstSentAt) {
+      otpSession.firstSentAt = now;
+    }
+    otpSession.lastSentAt = now;
+    otpSession.status = "pending";
+    otpSession.otpExpiry = new Date(now.getTime() + OTP_WINDOW_MS);
+
+    await otpSession.save();
+
+    const response = await callFast2SmsOtpSend(cleanPhone);
+    const responseData = response?.data || {};
+
+    otpSession.providerRequestId =
+      responseData?.request_id ||
+      responseData?.requestId ||
+      otpSession.providerRequestId ||
+      null;
+    otpSession.sendCount = (otpSession.sendCount || 0) + 1;
+    otpSession.status = "pending";
+    otpSession.otpExpiry = new Date(now.getTime() + OTP_WINDOW_MS);
+    await otpSession.save();
 
     return res.json({
       success: true,
       message: "OTP sent successfully",
-      vendorResponse: response.data,
+      vendorResponse: responseData,
     });
   } catch (error) {
+    const normalizedError = normalizeFast2SmsError(error);
     console.error("[OTP][send:error]", {
-      requestId,
       phone: maskPhone(req.body?.phone),
-      message: error?.message,
-      code: error?.code,
-      status: error?.response?.status,
-      response: summarizeVendorResponse(error?.response?.data),
-      durationMs: Date.now() - requestStartedAt,
+      message: normalizedError.message,
+      status: normalizedError.status,
+      response: summarizeVendorResponse(normalizedError.data),
     });
 
     return res
-      .status(500)
-      .json({ success: false, message: "Failed to send OTP" });
+      .status(normalizedError.status || 500)
+      .json({
+        success: false,
+        message: normalizedError.message || "Failed to send OTP",
+      });
+  }
+};
+
+const resendOTP = async (req, res) => {
+  try {
+    const { phone } = req.body;
+    const cleanPhone = normalizePhone(phone);
+
+    if (!cleanPhone) {
+      return res.status(400).json({
+        success: false,
+        message: "Phone number is required",
+      });
+    }
+
+    if (!/^[6-9]\d{9}$/.test(cleanPhone)) {
+      return res.status(400).json({
+        success: false,
+        message: "Please enter a valid 10 digit mobile number",
+      });
+    }
+
+    if (!FAST2SMS_API_KEY || !FAST2SMS_OTP_ID) {
+      return res.status(500).json({
+        success: false,
+        message: "OTP service is not configured",
+      });
+    }
+
+    const otpSession = await Otp.findOne({ phone: cleanPhone });
+
+    if (!otpSession) {
+      return res.status(404).json({
+        success: false,
+        message: "No OTP request found for this number",
+      });
+    }
+
+    if (otpSession.status === "verified") {
+      return res.status(400).json({
+        success: false,
+        message: "OTP already verified",
+      });
+    }
+
+    if (isOtpWindowExpired(otpSession)) {
+      otpSession.status = "expired";
+      await otpSession.save();
+
+      return res.status(400).json({
+        success: false,
+        message: "OTP has expired. Please request a new one",
+      });
+    }
+
+    const now = new Date();
+    if (otpSession.lastSentAt) {
+      const cooldownElapsed = now.getTime() - new Date(otpSession.lastSentAt).getTime();
+
+      if (cooldownElapsed < OTP_SEND_COOLDOWN_MS) {
+        return res.status(429).json({
+          success: false,
+          message: "Please wait before requesting another OTP",
+        });
+      }
+    }
+
+    if ((otpSession.sendCount || 0) >= OTP_MAX_TOTAL_ATTEMPTS) {
+      return res.status(429).json({
+        success: false,
+        message: "OTP limit reached. Please try again later.",
+      });
+    }
+
+    otpSession.lastSentAt = now;
+    await otpSession.save();
+
+    const response = await callFast2SmsOtpResend(cleanPhone);
+    const responseData = response?.data || {};
+
+    otpSession.resendCount = (otpSession.resendCount || 0) + 1;
+    otpSession.sendCount = (otpSession.sendCount || 0) + 1;
+    otpSession.providerRequestId =
+      responseData?.request_id ||
+      responseData?.requestId ||
+      otpSession.providerRequestId ||
+      null;
+    otpSession.status = "pending";
+    otpSession.otpExpiry = new Date(now.getTime() + OTP_WINDOW_MS);
+    await otpSession.save();
+
+    return res.status(200).json({
+      success: true,
+      message: "OTP resent successfully",
+      vendorResponse: responseData,
+    });
+  } catch (error) {
+    const normalizedError = normalizeFast2SmsError(error);
+    console.error("[OTP][resend:error]", {
+      phone: maskPhone(req.body?.phone),
+      message: normalizedError.message,
+      status: normalizedError.status,
+      response: summarizeVendorResponse(normalizedError.data),
+    });
+
+    return res.status(normalizedError.status || 500).json({
+      success: false,
+      message: normalizedError.message || "Failed to resend OTP",
+    });
   }
 };
 
@@ -307,26 +514,29 @@ const verifyOTP = async (req, res) => {
 
     const cleanPhone = normalizePhone(phone);
 
-    const otpRecord = await Otp.findOne({ phone: cleanPhone });
+    if (!FAST2SMS_API_KEY) {
+      return res.status(500).json({
+        success: false,
+        message: "OTP service is not configured",
+      });
+    }
 
-    if (!otpRecord) {
+    const otpSession = await Otp.findOne({ phone: cleanPhone });
+
+    if (!otpSession) {
       return res.status(404).json({
         success: false,
         message: "No OTP request found for this phone number",
       });
     }
 
-    if (otpRecord.otp !== otp) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid OTP",
-      });
-    }
+    const response = await callFast2SmsOtpVerify(cleanPhone, String(otp));
+    const responseData = response?.data || {};
 
-    if (otpRecord.otpExpiry < Date.now()) {
+    if (responseData?.status_code && responseData.status_code !== 200) {
       return res.status(400).json({
         success: false,
-        message: "OTP has expired",
+        message: responseData?.message || "Invalid OTP",
       });
     }
 
@@ -358,23 +568,144 @@ const verifyOTP = async (req, res) => {
     return res.status(200).json({
       success: true,
       message: "OTP verified successfully",
-      user: {
-        _id: user._id,
-        phone: user.phone,
-        fullName: user.fullName,
-        email: user.email,
-        profileCompleted: user.profileCompleted,
-        walletBalance: getPointBalance(user),
-        rewardPoints: getPointBalance(user),
-        signupBonusGranted: Boolean(user.signupBonusGranted),
-      },
+      user: buildUserAuthResponse(user),
       token,
     });
   } catch (error) {
-    console.error("Verify OTP Error:", error.message);
-    return res
-      .status(500)
-      .json({ success: false, message: "Failed to verify OTP" });
+    const normalizedError = normalizeFast2SmsError(error);
+    console.error("Verify OTP Error:", normalizedError.message);
+
+    return res.status(normalizedError.status || 500).json({
+      success: false,
+      message: normalizedError.message || "Failed to verify OTP",
+    });
+  }
+};
+
+const googleSignIn = async (req, res) => {
+  try {
+    const token = req.body?.idToken || req.body?.credential || req.body?.googleToken;
+    const clientIds = parseGoogleClientIds();
+
+    if (!token) {
+      return res.status(400).json({
+        success: false,
+        message: "Google credential is required",
+      });
+    }
+
+    const verifyOptions = { idToken: token };
+
+    if (clientIds.length > 0) {
+      verifyOptions.audience = clientIds;
+    }
+
+    const ticket = await googleClient.verifyIdToken(verifyOptions);
+    const payload = ticket.getPayload();
+
+    if (!payload) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid Google credential",
+      });
+    }
+
+    if (payload.email && payload.email_verified === false) {
+      return res.status(400).json({
+        success: false,
+        message: "Google email is not verified",
+      });
+    }
+
+    const googleId = String(payload.sub || "").trim();
+    const email = normalizeEmail(payload.email);
+    const fullName =
+      String(payload.name || req.body?.name || "")
+        .trim() || null;
+    const profileImage =
+      String(payload.picture || req.body?.profileImage || "")
+        .trim() || null;
+
+    if (!googleId) {
+      return res.status(400).json({
+        success: false,
+        message: "Google account identifier missing",
+      });
+    }
+
+    let user = await User.findOne({
+      $or: [
+        { googleId },
+        ...(email ? [{ email }] : []),
+      ],
+    });
+
+    const isNewUser = !user;
+
+    if (!user) {
+      user = new User({
+        googleId,
+        email: email || undefined,
+        fullName,
+        profileImage,
+        phone: undefined,
+        loginType: "google",
+        isVerified: true,
+        profileCompleted: Boolean(fullName && email),
+      });
+    } else {
+      if (!user.googleId) {
+        user.googleId = googleId;
+      }
+
+      if (email && !user.email) {
+        user.email = email;
+      }
+
+      if (fullName && !user.fullName) {
+        user.fullName = fullName;
+      }
+
+      if (profileImage && !user.profileImage) {
+        user.profileImage = profileImage;
+      }
+
+      user.loginType = "google";
+      user.isVerified = true;
+
+      if (fullName && email) {
+        user.profileCompleted = true;
+      }
+    }
+
+    await user.save();
+
+    const persistedUserId = user._id;
+
+    if (!user.signupBonusGranted) {
+      try {
+        await creditSignupBonus(persistedUserId);
+        user = await User.findById(persistedUserId);
+      } catch (bonusError) {
+        console.error("Google signup bonus credit failed:", bonusError.message);
+      }
+    }
+
+    const refreshedUser = user || (await User.findById(persistedUserId));
+    const tokenJwt = refreshedUser.getJWTtoken();
+
+    return res.status(200).json({
+      success: true,
+      message: isNewUser ? "Google sign-in successful" : "Google login successful",
+      user: buildUserAuthResponse(refreshedUser),
+      token: tokenJwt,
+    });
+  } catch (error) {
+    console.error("Google Sign-In Error:", error.message);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to sign in with Google",
+    });
   }
 };
 
@@ -632,7 +963,9 @@ const sendOrderEmailSms = async (req, res) => {
 
 module.exports = {
   sendOTP,
+  resendOTP,
   verifyOTP,
+  googleSignIn,
   logoutUser,
   completeUserProfile,
   saveFcmToken,

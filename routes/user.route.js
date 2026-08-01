@@ -1,6 +1,8 @@
 const {
   sendOTP,
+  resendOTP,
   verifyOTP,
+  googleSignIn,
   logoutUser,
   completeUserProfile,
   saveFcmToken,
@@ -13,7 +15,9 @@ const { isAuth } = require("../middlewares/auth.middleware");
 const userRouter = require("express").Router();
 
 userRouter.post("/send-otp", sendOTP);
+userRouter.post("/resend-otp", resendOTP);
 userRouter.post("/verify-otp", verifyOTP);
+userRouter.post("/google-signin", googleSignIn);
 userRouter.post("/logout", logoutUser);
 userRouter.post("/complete-profile", isAuth, completeUserProfile);
 userRouter.post("/sendmailsms", isAuth, sendOrderEmailSms);

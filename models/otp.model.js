@@ -11,12 +11,44 @@ const otpSchema = new mongoose.Schema(
     },
     otp: {
       type: String,
-      required: true,
+      default: null,
     },
     otpExpiry: {
       type: Date,
-      required: true,
+      default: null,
       index: true,
+    },
+    providerRequestId: {
+      type: String,
+      default: null,
+      trim: true,
+    },
+    status: {
+      type: String,
+      enum: ["pending", "verified", "expired"],
+      default: "pending",
+    },
+    firstSentAt: {
+      type: Date,
+      default: null,
+    },
+    lastSentAt: {
+      type: Date,
+      default: null,
+    },
+    resendCount: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    sendCount: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    verifiedAt: {
+      type: Date,
+      default: null,
     },
   },
   { timestamps: true },
