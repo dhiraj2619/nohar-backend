@@ -82,6 +82,16 @@ const buildUserAuthResponse = (user) => ({
 const OTP_WINDOW_MS = 10 * 60 * 1000;
 const OTP_SEND_COOLDOWN_MS = 60 * 1000;
 const OTP_MAX_TOTAL_ATTEMPTS = 5;
+const buildOtpSessionDefaults = (phone, now) => ({
+  phone,
+  firstSentAt: now,
+  lastSentAt: now,
+  resendCount: 0,
+  sendCount: 0,
+  status: "pending",
+  otpExpiry: new Date(now.getTime() + OTP_WINDOW_MS),
+  providerRequestId: null,
+});
 
 const getOtpWindowStart = (otpSession) =>
   otpSession?.firstSentAt ? new Date(otpSession.firstSentAt) : null;
@@ -330,14 +340,25 @@ const sendOTP = async (req, res) => {
     }
 
     if (!otpSession) {
-      otpSession = new Otp({
-        phone: cleanPhone,
-        firstSentAt: now,
-        lastSentAt: null,
-        resendCount: 0,
-        sendCount: 0,
-        status: "pending",
-      });
+      try {
+        otpSession = await Otp.findOneAndUpdate(
+          { phone: cleanPhone },
+          {
+            $setOnInsert: buildOtpSessionDefaults(cleanPhone, now),
+          },
+          {
+            new: true,
+            upsert: true,
+            setDefaultsOnInsert: true,
+          },
+        );
+      } catch (error) {
+        if (error?.code === 11000) {
+          otpSession = await Otp.findOne({ phone: cleanPhone });
+        } else {
+          throw error;
+        }
+      }
     }
 
     if ((otpSession.sendCount || 0) >= OTP_MAX_TOTAL_ATTEMPTS) {
@@ -347,9 +368,7 @@ const sendOTP = async (req, res) => {
       });
     }
 
-    if (!otpSession.firstSentAt) {
-      otpSession.firstSentAt = now;
-    }
+    otpSession.firstSentAt = otpSession.firstSentAt || now;
     otpSession.lastSentAt = now;
     otpSession.status = "pending";
     otpSession.otpExpiry = new Date(now.getTime() + OTP_WINDOW_MS);
