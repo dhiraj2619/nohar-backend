@@ -50,6 +50,33 @@ const otpSchema = new mongoose.Schema(
       type: Date,
       default: null,
     },
+    verifyAttempts: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    lastVerifyAt: {
+      type: Date,
+      default: null,
+    },
+    failureReason: {
+      type: String,
+      default: null,
+      trim: true,
+    },
+    providerStatusCode: {
+      type: Number,
+      default: null,
+    },
+    deliveryStatus: {
+      type: String,
+      default: null,
+      trim: true,
+    },
+    lastProviderResponse: {
+      type: mongoose.Schema.Types.Mixed,
+      default: null,
+    },
   },
   { timestamps: true },
 );

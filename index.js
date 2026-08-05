@@ -1,4 +1,4 @@
-require("dotenv").config();
+﻿require("dotenv").config();
 
 const express = require("express");
 const path = require("path");
@@ -74,6 +74,7 @@ app.use("/api/v1/offers", offerRouter);
 app.use("/api/v1/ads", adRouter);
 app.use("/api/v1/quote-sliders", quoteSliderRouter);
 app.use("/api/v1/users", userRouter);
+app.use("/api/v1/auth", userRouter);
 app.use("/api/v1/shipping", shippingRouter);
 app.use("/api/v1/payment", paymentRouter);
 app.use("/api/v1/wallet", walletRouter);
@@ -129,3 +130,5 @@ setInterval(
   },
   Number(process.env.REWARD_SETTLEMENT_SWEEP_MS || 60 * 1000),
 );
+
+
