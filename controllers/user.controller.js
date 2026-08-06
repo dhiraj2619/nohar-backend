@@ -145,7 +145,6 @@ const buildUserAuthResponse = (user) => ({
 });
 
 const OTP_WINDOW_MS = 10 * 60 * 1000;
-const OTP_SEND_COOLDOWN_MS = 60 * 1000;
 const OTP_MAX_TOTAL_ATTEMPTS = 5;
 const buildOtpSessionDefaults = (phone, now) => ({
   phone,
@@ -195,6 +194,16 @@ const normalizeFast2SmsError = (error) => {
     data,
     message,
   };
+};
+
+const normalizeOtpGatewayStatus = status => {
+  const numericStatus = Number(status);
+
+  if (!numericStatus || numericStatus === 401 || numericStatus === 403) {
+    return 502;
+  }
+
+  return numericStatus;
 };
 
 const callFast2SmsOtpSend = async (mobile) =>
@@ -445,26 +454,6 @@ const sendOTP = async (req, res) => {
       resetOtpWindow(otpSession, now);
     }
 
-    if (otpSession?.status === "pending" && otpSession.lastSentAt) {
-      const cooldownElapsed = now.getTime() - new Date(otpSession.lastSentAt).getTime();
-
-      if (cooldownElapsed < OTP_SEND_COOLDOWN_MS) {
-        const retryAfterSeconds = Math.ceil((OTP_SEND_COOLDOWN_MS - cooldownElapsed) / 1000);
-        logOtpEvent("send:rate_limited", {
-          traceId,
-          source,
-          phone: maskPhone(req.body?.phone || req.body?.mobile),
-          retryAfterSeconds,
-        });
-
-        return res.status(429).json({
-          success: false,
-          message: "Please wait before requesting another OTP",
-          retryAfterSeconds,
-        });
-      }
-    }
-
     if (!otpSession) {
       try {
         otpSession = await Otp.findOneAndUpdate(
@@ -556,7 +545,7 @@ const sendOTP = async (req, res) => {
       response: normalizedError.data,
     });
 
-    return res.status(normalizedError.status || 500).json({
+    return res.status(normalizeOtpGatewayStatus(normalizedError.status)).json({
       success: false,
       message: normalizedError.message || "Failed to send OTP",
     });
@@ -650,26 +639,6 @@ const resendOTP = async (req, res) => {
       });
     }
 
-    if (otpSession.lastSentAt) {
-      const cooldownElapsed = now.getTime() - new Date(otpSession.lastSentAt).getTime();
-
-      if (cooldownElapsed < OTP_SEND_COOLDOWN_MS) {
-        const retryAfterSeconds = Math.ceil((OTP_SEND_COOLDOWN_MS - cooldownElapsed) / 1000);
-        logOtpEvent("resend:rate_limited", {
-          traceId,
-          source,
-          phone: maskPhone(req.body?.phone || req.body?.mobile),
-          retryAfterSeconds,
-        });
-
-        return res.status(429).json({
-          success: false,
-          message: "Please wait before requesting another OTP",
-          retryAfterSeconds,
-        });
-      }
-    }
-
     if ((otpSession.sendCount || 0) >= OTP_MAX_TOTAL_ATTEMPTS) {
       logOtpEvent("resend:limit_reached", {
         traceId,
@@ -744,7 +713,7 @@ const resendOTP = async (req, res) => {
       response: normalizedError.data,
     });
 
-    return res.status(normalizedError.status || 500).json({
+    return res.status(normalizeOtpGatewayStatus(normalizedError.status)).json({
       success: false,
       message: normalizedError.message || "Failed to resend OTP",
     });
@@ -959,7 +928,7 @@ const verifyOTP = async (req, res) => {
       response: normalizedError.data,
     });
 
-    return res.status(normalizedError.status || 500).json({
+    return res.status(normalizeOtpGatewayStatus(normalizedError.status)).json({
       success: false,
       message: normalizedError.message || "Failed to verify OTP",
     });
@@ -1416,6 +1385,7 @@ module.exports = {
   clearFcmToken,
   sendOrderEmailSms,
 };
+
 
 
 
