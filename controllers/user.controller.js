@@ -530,7 +530,7 @@ const sendOTP = async (req, res) => {
     logOtpEvent("send:error", {
       traceId,
       source,
-      phone: maskPhone(phone),
+      phone: maskPhone(cleanPhone),
       message: normalizedError.message,
       status: normalizedError.status,
       response: normalizedError.data,
@@ -719,7 +719,7 @@ const resendOTP = async (req, res) => {
     logOtpEvent("resend:error", {
       traceId,
       source,
-      phone: maskPhone(phone),
+      phone: maskPhone(cleanPhone),
       message: normalizedError.message,
       status: normalizedError.status,
       response: normalizedError.data,
@@ -934,7 +934,7 @@ const verifyOTP = async (req, res) => {
     logOtpEvent("verify:error", {
       traceId,
       source,
-      phone: maskPhone(phone),
+      phone: maskPhone(cleanPhone),
       message: normalizedError.message,
       status: normalizedError.status,
       response: normalizedError.data,
@@ -1397,6 +1397,7 @@ module.exports = {
   clearFcmToken,
   sendOrderEmailSms,
 };
+
 
 
 
