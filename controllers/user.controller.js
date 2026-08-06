@@ -27,6 +27,27 @@ const normalizePhone = (value) => {
   const digits = String(value || "").replace(/\D/g, "");
   return digits.length > 10 ? digits.slice(-10) : digits;
 };
+const normalizeAuthPhone = (body = {}) =>
+  normalizePhone(body?.phone || body?.mobile || body?.mobileNumber || body?.phoneNumber);
+
+const normalizeAuthCountryCode = (body = {}) =>
+  String(body?.countryCode || body?.country || "+91").trim() || "+91";
+
+const buildProfileCompletionPayload = (body = {}) => {
+  const firstname = String(body?.firstname || body?.firstName || "").trim();
+  const lastname = String(body?.lastname || body?.lastName || "").trim();
+  const fullName = String(body?.fullName || `${firstname} ${lastname}`.trim()).trim();
+  const email = normalizeEmail(body?.email);
+  const phone = normalizeAuthPhone(body);
+
+  return {
+    firstname,
+    lastname,
+    fullName,
+    email,
+    phone,
+  };
+};
 const parseGoogleClientIds = () =>
   [
     GOOGLE_WEB_CLIENT_ID,
@@ -372,14 +393,13 @@ const sendOTP = async (req, res) => {
   const source = getOtpClientSource(req);
 
   try {
-    const phone = req.body?.phone || req.body?.mobile;
     const cleanPhone = normalizeAuthPhone(req.body);
     const now = new Date();
 
     logOtpEvent("send:attempt", {
       traceId,
       source,
-      phone: maskPhone(cleanPhone),
+      phone: maskPhone(req.body?.phone || req.body?.mobile),
       requestedAt: now.toISOString(),
     });
 
@@ -395,7 +415,7 @@ const sendOTP = async (req, res) => {
       logOtpEvent("send:validation_failed", {
         traceId,
         source,
-        phone: maskPhone(cleanPhone),
+        phone: maskPhone(req.body?.phone || req.body?.mobile),
         reason: "invalid_indian_mobile",
       });
 
@@ -433,7 +453,7 @@ const sendOTP = async (req, res) => {
         logOtpEvent("send:rate_limited", {
           traceId,
           source,
-          phone: maskPhone(cleanPhone),
+          phone: maskPhone(req.body?.phone || req.body?.mobile),
           retryAfterSeconds,
         });
 
@@ -465,7 +485,7 @@ const sendOTP = async (req, res) => {
       logOtpEvent("send:limit_reached", {
         traceId,
         source,
-        phone: maskPhone(cleanPhone),
+        phone: maskPhone(req.body?.phone || req.body?.mobile),
         sendCount: otpSession.sendCount || 0,
       });
 
@@ -502,7 +522,7 @@ const sendOTP = async (req, res) => {
     logOtpEvent(providerSuccess ? "send:success" : "send:provider_failed", {
       traceId,
       source,
-      phone: maskPhone(cleanPhone),
+      phone: maskPhone(req.body?.phone || req.body?.mobile),
       providerRequestId,
       providerStatusCode,
       deliveryStatus: otpSession.deliveryStatus,
@@ -530,7 +550,7 @@ const sendOTP = async (req, res) => {
     logOtpEvent("send:error", {
       traceId,
       source,
-      phone: maskPhone(cleanPhone),
+      phone: maskPhone(req.body?.phone || req.body?.mobile),
       message: normalizedError.message,
       status: normalizedError.status,
       response: normalizedError.data,
@@ -548,14 +568,13 @@ const resendOTP = async (req, res) => {
   const source = getOtpClientSource(req);
 
   try {
-    const phone = req.body?.phone || req.body?.mobile;
     const cleanPhone = normalizeAuthPhone(req.body);
     const now = new Date();
 
     logOtpEvent("resend:attempt", {
       traceId,
       source,
-      phone: maskPhone(cleanPhone),
+      phone: maskPhone(req.body?.phone || req.body?.mobile),
       requestedAt: now.toISOString(),
     });
 
@@ -571,7 +590,7 @@ const resendOTP = async (req, res) => {
       logOtpEvent("resend:validation_failed", {
         traceId,
         source,
-        phone: maskPhone(cleanPhone),
+        phone: maskPhone(req.body?.phone || req.body?.mobile),
         reason: "invalid_indian_mobile",
       });
 
@@ -603,7 +622,7 @@ const resendOTP = async (req, res) => {
       logOtpEvent("resend:already_verified", {
         traceId,
         source,
-        phone: maskPhone(cleanPhone),
+        phone: maskPhone(req.body?.phone || req.body?.mobile),
         verifiedAt: otpSession.verifiedAt,
       });
 
@@ -621,7 +640,7 @@ const resendOTP = async (req, res) => {
       logOtpEvent("resend:expired", {
         traceId,
         source,
-        phone: maskPhone(cleanPhone),
+        phone: maskPhone(req.body?.phone || req.body?.mobile),
         expiryTime: otpSession.otpExpiry,
       });
 
@@ -639,7 +658,7 @@ const resendOTP = async (req, res) => {
         logOtpEvent("resend:rate_limited", {
           traceId,
           source,
-          phone: maskPhone(cleanPhone),
+          phone: maskPhone(req.body?.phone || req.body?.mobile),
           retryAfterSeconds,
         });
 
@@ -655,7 +674,7 @@ const resendOTP = async (req, res) => {
       logOtpEvent("resend:limit_reached", {
         traceId,
         source,
-        phone: maskPhone(cleanPhone),
+        phone: maskPhone(req.body?.phone || req.body?.mobile),
         sendCount: otpSession.sendCount || 0,
       });
 
@@ -691,7 +710,7 @@ const resendOTP = async (req, res) => {
     logOtpEvent(providerSuccess ? "resend:success" : "resend:provider_failed", {
       traceId,
       source,
-      phone: maskPhone(cleanPhone),
+      phone: maskPhone(req.body?.phone || req.body?.mobile),
       providerRequestId,
       providerStatusCode,
       deliveryStatus: otpSession.deliveryStatus,
@@ -719,7 +738,7 @@ const resendOTP = async (req, res) => {
     logOtpEvent("resend:error", {
       traceId,
       source,
-      phone: maskPhone(cleanPhone),
+      phone: maskPhone(req.body?.phone || req.body?.mobile),
       message: normalizedError.message,
       status: normalizedError.status,
       response: normalizedError.data,
@@ -745,7 +764,7 @@ const verifyOTP = async (req, res) => {
     logOtpEvent("verify:attempt", {
       traceId,
       source,
-      phone: maskPhone(cleanPhone),
+      phone: maskPhone(req.body?.phone || req.body?.mobile),
       attemptedAt: now.toISOString(),
       otpLength: cleanOtp.length,
     });
@@ -754,7 +773,7 @@ const verifyOTP = async (req, res) => {
       logOtpEvent("verify:validation_failed", {
         traceId,
         source,
-        phone: maskPhone(cleanPhone),
+        phone: maskPhone(req.body?.phone || req.body?.mobile),
         reason: "missing_phone_or_otp",
       });
 
@@ -768,7 +787,7 @@ const verifyOTP = async (req, res) => {
       logOtpEvent("verify:validation_failed", {
         traceId,
         source,
-        phone: maskPhone(cleanPhone),
+        phone: maskPhone(req.body?.phone || req.body?.mobile),
         reason: "invalid_phone_or_otp_format",
       });
 
@@ -806,7 +825,7 @@ const verifyOTP = async (req, res) => {
       logOtpEvent("verify:already_verified", {
         traceId,
         source,
-        phone: maskPhone(cleanPhone),
+        phone: maskPhone(req.body?.phone || req.body?.mobile),
         providerRequestId: otpSession.providerRequestId,
         verifiedAt: otpSession.verifiedAt,
       });
@@ -824,7 +843,7 @@ const verifyOTP = async (req, res) => {
       logOtpEvent("verify:invalid_status", {
         traceId,
         source,
-        phone: maskPhone(cleanPhone),
+        phone: maskPhone(req.body?.phone || req.body?.mobile),
         status: otpSession.status,
       });
 
@@ -842,7 +861,7 @@ const verifyOTP = async (req, res) => {
       logOtpEvent("verify:expired", {
         traceId,
         source,
-        phone: maskPhone(cleanPhone),
+        phone: maskPhone(req.body?.phone || req.body?.mobile),
         providerRequestId: otpSession.providerRequestId,
         expiryTime: otpSession.otpExpiry,
       });
@@ -868,7 +887,7 @@ const verifyOTP = async (req, res) => {
       logOtpEvent("verify:failed", {
         traceId,
         source,
-        phone: maskPhone(cleanPhone),
+        phone: maskPhone(req.body?.phone || req.body?.mobile),
         providerRequestId: otpSession.providerRequestId,
         providerStatusCode,
         verifyAttempts: otpSession.verifyAttempts,
@@ -915,7 +934,7 @@ const verifyOTP = async (req, res) => {
     logOtpEvent("verify:success", {
       traceId,
       source,
-      phone: maskPhone(cleanPhone),
+      phone: maskPhone(req.body?.phone || req.body?.mobile),
       providerRequestId: otpSession.providerRequestId,
       providerStatusCode,
       verifyAttempts: otpSession.verifyAttempts,
@@ -934,7 +953,7 @@ const verifyOTP = async (req, res) => {
     logOtpEvent("verify:error", {
       traceId,
       source,
-      phone: maskPhone(cleanPhone),
+      phone: maskPhone(req.body?.phone || req.body?.mobile),
       message: normalizedError.message,
       status: normalizedError.status,
       response: normalizedError.data,
@@ -1397,6 +1416,8 @@ module.exports = {
   clearFcmToken,
   sendOrderEmailSms,
 };
+
+
 
 
 
