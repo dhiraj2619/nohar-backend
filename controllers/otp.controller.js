@@ -3,6 +3,32 @@ const OtpAction = require("../models/otpAction.model");
 const escapeRegex = (value) =>
   String(value || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
+const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
+
+const getTodayRangeInIst = () => {
+  const now = new Date();
+  const formatter = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Kolkata",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  });
+  const parts = formatter.formatToParts(now);
+  const map = Object.fromEntries(
+    parts
+      .filter((part) => part.type !== "literal")
+      .map((part) => [part.type, part.value]),
+  );
+
+  const year = Number(map.year);
+  const month = Number(map.month);
+  const day = Number(map.day);
+  const start = new Date(Date.UTC(year, month - 1, day) - IST_OFFSET_MS);
+  const end = new Date(start.getTime() + 24 * 60 * 60 * 1000);
+
+  return { start, end };
+};
+
 const normalizeSourceFilter = (value) => {
   const normalized = String(value || "").trim().toLowerCase();
 
@@ -145,6 +171,38 @@ const getOtpActions = async (req, res) => {
   }
 };
 
+const wipeTodayOtpActions = async (_req, res) => {
+  try {
+    const { start, end } = getTodayRangeInIst();
+
+    const result = await OtpAction.deleteMany({
+      createdAt: {
+        $gte: start,
+        $lt: end,
+      },
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: "Today's OTP actions deleted successfully",
+      deletedCount: result?.deletedCount || 0,
+      dateRange: {
+        start,
+        end,
+      },
+    });
+  } catch (error) {
+    console.error("Wipe today's OTP actions error:", error.message);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to wipe today's OTP actions",
+      error: error.message,
+    });
+  }
+};
+
 module.exports = {
   getOtpActions,
+  wipeTodayOtpActions,
 };
