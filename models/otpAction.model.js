@@ -1,27 +1,18 @@
 const mongoose = require("mongoose");
 
-const otpSchema = new mongoose.Schema(
+const otpActionSchema = new mongoose.Schema(
   {
     phone: {
       type: String,
-      unique: true,
       required: true,
       index: true,
       trim: true,
     },
-    otp: {
+    actionType: {
       type: String,
-      default: null,
-    },
-    otpExpiry: {
-      type: Date,
-      default: null,
+      enum: ["send", "resend", "verify"],
+      required: true,
       index: true,
-    },
-    providerRequestId: {
-      type: String,
-      default: null,
-      trim: true,
     },
     source: {
       type: String,
@@ -44,43 +35,13 @@ const otpSchema = new mongoose.Schema(
       default: null,
       trim: true,
     },
-    status: {
+    traceId: {
       type: String,
-      enum: ["pending", "verified", "expired"],
-      default: "pending",
-    },
-    firstSentAt: {
-      type: Date,
       default: null,
+      index: true,
+      trim: true,
     },
-    lastSentAt: {
-      type: Date,
-      default: null,
-    },
-    resendCount: {
-      type: Number,
-      default: 0,
-      min: 0,
-    },
-    sendCount: {
-      type: Number,
-      default: 0,
-      min: 0,
-    },
-    verifiedAt: {
-      type: Date,
-      default: null,
-    },
-    verifyAttempts: {
-      type: Number,
-      default: 0,
-      min: 0,
-    },
-    lastVerifyAt: {
-      type: Date,
-      default: null,
-    },
-    failureReason: {
+    providerRequestId: {
       type: String,
       default: null,
       trim: true,
@@ -94,7 +55,17 @@ const otpSchema = new mongoose.Schema(
       default: null,
       trim: true,
     },
-    lastProviderResponse: {
+    status: {
+      type: String,
+      default: null,
+      trim: true,
+    },
+    failureReason: {
+      type: String,
+      default: null,
+      trim: true,
+    },
+    providerResponse: {
       type: mongoose.Schema.Types.Mixed,
       default: null,
     },
@@ -102,6 +73,6 @@ const otpSchema = new mongoose.Schema(
   { timestamps: true },
 );
 
-const Otp = mongoose.model("Otp", otpSchema);
+const OtpAction = mongoose.model("OtpAction", otpActionSchema);
 
-module.exports = Otp;
+module.exports = OtpAction;

@@ -16,6 +16,7 @@ const {
   OTP_TEMPLATE_ID,
 } = require("../config/config");
 const Otp = require("../models/otp.model");
+const OtpAction = require("../models/otpAction.model");
 const User = require("../models/users.model");
 const { creditSignupBonus, getPointBalance } = require("../services/rewards.service");
 
@@ -111,9 +112,6 @@ const isFast2SmsSuccess = (data, fallbackStatus) => {
 const getFast2SmsMessage = (data, fallbackMessage = "OTP provider request failed") =>
   data?.message || data?.error || data?.description || fallbackMessage;
 
-const getOtpClientSource = (req) =>
-  String(req.body?.source || req.headers?.["x-client-source"] || "unknown").slice(0, 40);
-
 const logOtpEvent = (event, details = {}) => {
   const payload = {
     at: new Date().toISOString(),
@@ -125,6 +123,117 @@ const logOtpEvent = (event, details = {}) => {
   }
 
   console.info(`[OTP][${event}]`, payload);
+};
+const normalizeOtpSource = (value) => {
+  const normalized = String(value || "").trim().toLowerCase();
+
+  if (!normalized) {
+    return "unknown";
+  }
+
+  if (["app", "android", "ios", "mobile"].some((token) => normalized.includes(token))) {
+    return "app";
+  }
+
+  if (["web", "website", "browser", "desktop"].some((token) => normalized.includes(token))) {
+    return "website";
+  }
+
+  return "unknown";
+};
+
+const inferOtpSourceFromUserAgent = (userAgent) => {
+  const normalized = String(userAgent || "").trim().toLowerCase();
+
+  if (!normalized) {
+    return "unknown";
+  }
+
+  if (
+    /(bot|crawler|spider|scrapy|curl|wget|postman|insomnia|axios|python-requests|node-fetch|fetch)/i.test(
+      normalized,
+    )
+  ) {
+    return "unknown";
+  }
+
+  if (/(okhttp|dart|flutter|reactnative|react native|mobile|android|iphone|ipad)/i.test(normalized)) {
+    return "app";
+  }
+
+  if (/(mozilla|chrome|safari|firefox|edg|trident)/i.test(normalized)) {
+    return "website";
+  }
+
+  return "unknown";
+};
+
+const resolveOtpSourceContext = (req) => {
+  const requestedSource = String(
+    req.body?.source ||
+      req.body?.clientSource ||
+      req.headers?.["x-client-source"] ||
+      req.headers?.["x-app-source"] ||
+      req.headers?.["x-web-source"] ||
+      "",
+  ).trim();
+  const userAgent = String(req.headers?.["user-agent"] || "").trim().slice(0, 255) || null;
+  const forwardedFor = String(req.headers?.["x-forwarded-for"] || "").split(",")[0].trim();
+  const ipAddress =
+    forwardedFor ||
+    String(req.ip || req.socket?.remoteAddress || req.connection?.remoteAddress || "").trim() ||
+    null;
+
+  const source = requestedSource
+    ? normalizeOtpSource(requestedSource)
+    : inferOtpSourceFromUserAgent(userAgent);
+
+  return {
+    source,
+    sourceRaw: requestedSource || null,
+    sourceUserAgent: userAgent,
+    sourceIpAddress: ipAddress,
+  };
+};
+
+const applyOtpSourceContext = (otpSession, sourceContext = {}) => {
+  otpSession.source = sourceContext.source || otpSession.source || "unknown";
+  otpSession.sourceRaw = sourceContext.sourceRaw ?? otpSession.sourceRaw ?? null;
+  otpSession.sourceUserAgent = sourceContext.sourceUserAgent ?? otpSession.sourceUserAgent ?? null;
+  otpSession.sourceIpAddress = sourceContext.sourceIpAddress ?? otpSession.sourceIpAddress ?? null;
+};
+
+const recordOtpAction = async ({
+  phone,
+  actionType,
+  sourceContext = {},
+  traceId = null,
+  providerRequestId = null,
+  providerStatusCode = null,
+  deliveryStatus = null,
+  status = null,
+  failureReason = null,
+  providerResponse = null,
+}) => {
+  try {
+    await OtpAction.create({
+      phone,
+      actionType,
+      source: sourceContext.source || "unknown",
+      sourceRaw: sourceContext.sourceRaw || null,
+      sourceUserAgent: sourceContext.sourceUserAgent || null,
+      sourceIpAddress: sourceContext.sourceIpAddress || null,
+      traceId,
+      providerRequestId,
+      providerStatusCode,
+      deliveryStatus,
+      status,
+      failureReason,
+      providerResponse,
+    });
+  } catch (error) {
+    console.error("OTP action record failed:", error.message);
+  }
 };
 const formatCurrency = (amount) => {
   const numericAmount = Number(amount || 0);
@@ -146,7 +255,7 @@ const buildUserAuthResponse = (user) => ({
 
 const OTP_WINDOW_MS = 10 * 60 * 1000;
 const OTP_MAX_TOTAL_ATTEMPTS = 5;
-const buildOtpSessionDefaults = (phone, now) => ({
+const buildOtpSessionDefaults = (phone, now, sourceContext = {}) => ({
   phone,
   firstSentAt: now,
   lastSentAt: now,
@@ -155,6 +264,10 @@ const buildOtpSessionDefaults = (phone, now) => ({
   status: "pending",
   otpExpiry: new Date(now.getTime() + OTP_WINDOW_MS),
   providerRequestId: null,
+  source: sourceContext.source || "unknown",
+  sourceRaw: sourceContext.sourceRaw || null,
+  sourceUserAgent: sourceContext.sourceUserAgent || null,
+  sourceIpAddress: sourceContext.sourceIpAddress || null,
 });
 
 const getOtpWindowStart = (otpSession) =>
@@ -399,7 +512,8 @@ const checkUser = async (req, res) => {
 };
 const sendOTP = async (req, res) => {
   const traceId = buildOtpTraceId();
-  const source = getOtpClientSource(req);
+  const sourceContext = resolveOtpSourceContext(req);
+  const source = sourceContext.source;
 
   try {
     const cleanPhone = normalizeAuthPhone(req.body);
@@ -458,7 +572,7 @@ const sendOTP = async (req, res) => {
       try {
         otpSession = await Otp.findOneAndUpdate(
           { phone: cleanPhone },
-          { $setOnInsert: buildOtpSessionDefaults(cleanPhone, now) },
+          { $setOnInsert: buildOtpSessionDefaults(cleanPhone, now, sourceContext) },
           { new: true, upsert: true, setDefaultsOnInsert: true },
         );
       } catch (error) {
@@ -469,6 +583,8 @@ const sendOTP = async (req, res) => {
         }
       }
     }
+
+    applyOtpSourceContext(otpSession, sourceContext);
 
     if ((otpSession.sendCount || 0) >= OTP_MAX_TOTAL_ATTEMPTS) {
       logOtpEvent("send:limit_reached", {
@@ -507,6 +623,18 @@ const sendOTP = async (req, res) => {
     }
 
     await otpSession.save();
+    await recordOtpAction({
+      phone: cleanPhone,
+      actionType: "send",
+      sourceContext,
+      traceId,
+      providerRequestId,
+      providerStatusCode,
+      deliveryStatus: otpSession.deliveryStatus,
+      status: otpSession.status,
+      failureReason: otpSession.failureReason,
+      providerResponse: responseData,
+    });
 
     logOtpEvent(providerSuccess ? "send:success" : "send:provider_failed", {
       traceId,
@@ -544,6 +672,16 @@ const sendOTP = async (req, res) => {
       status: normalizedError.status,
       response: normalizedError.data,
     });
+    await recordOtpAction({
+      phone: normalizeAuthPhone(req.body),
+      actionType: "send",
+      sourceContext,
+      traceId,
+      deliveryStatus: "failed",
+      failureReason: normalizedError.message,
+      providerStatusCode: normalizedError.status,
+      providerResponse: normalizedError.data,
+    });
 
     return res.status(normalizeOtpGatewayStatus(normalizedError.status)).json({
       success: false,
@@ -554,7 +692,8 @@ const sendOTP = async (req, res) => {
 
 const resendOTP = async (req, res) => {
   const traceId = buildOtpTraceId();
-  const source = getOtpClientSource(req);
+  const sourceContext = resolveOtpSourceContext(req);
+  const source = sourceContext.source;
 
   try {
     const cleanPhone = normalizeAuthPhone(req.body);
@@ -674,7 +813,20 @@ const resendOTP = async (req, res) => {
       otpSession.otpExpiry = expiryTime;
     }
 
+    applyOtpSourceContext(otpSession, sourceContext);
     await otpSession.save();
+    await recordOtpAction({
+      phone: cleanPhone,
+      actionType: "resend",
+      sourceContext,
+      traceId,
+      providerRequestId,
+      providerStatusCode,
+      deliveryStatus: otpSession.deliveryStatus,
+      status: otpSession.status,
+      failureReason: otpSession.failureReason,
+      providerResponse: responseData,
+    });
 
     logOtpEvent(providerSuccess ? "resend:success" : "resend:provider_failed", {
       traceId,
@@ -712,6 +864,16 @@ const resendOTP = async (req, res) => {
       status: normalizedError.status,
       response: normalizedError.data,
     });
+    await recordOtpAction({
+      phone: normalizeAuthPhone(req.body),
+      actionType: "resend",
+      sourceContext,
+      traceId,
+      deliveryStatus: "failed",
+      failureReason: normalizedError.message,
+      providerStatusCode: normalizedError.status,
+      providerResponse: normalizedError.data,
+    });
 
     return res.status(normalizeOtpGatewayStatus(normalizedError.status)).json({
       success: false,
@@ -722,7 +884,8 @@ const resendOTP = async (req, res) => {
 
 const verifyOTP = async (req, res) => {
   const traceId = buildOtpTraceId();
-  const source = getOtpClientSource(req);
+  const sourceContext = resolveOtpSourceContext(req);
+  const source = sourceContext.source;
 
   try {
     const { phone, otp } = req.body;
@@ -852,6 +1015,18 @@ const verifyOTP = async (req, res) => {
     if (!providerSuccess) {
       otpSession.failureReason = getFast2SmsMessage(responseData, "Invalid OTP");
       await otpSession.save();
+      await recordOtpAction({
+        phone: cleanPhone,
+        actionType: "verify",
+        sourceContext,
+        traceId,
+        providerRequestId: otpSession.providerRequestId,
+        providerStatusCode,
+        deliveryStatus: "failed",
+        status: otpSession.status,
+        failureReason: otpSession.failureReason,
+        providerResponse: responseData,
+      });
 
       logOtpEvent("verify:failed", {
         traceId,
@@ -876,6 +1051,17 @@ const verifyOTP = async (req, res) => {
     otpSession.failureReason = null;
     otpSession.deliveryStatus = "verified";
     await otpSession.save();
+    await recordOtpAction({
+      phone: cleanPhone,
+      actionType: "verify",
+      sourceContext,
+      traceId,
+      providerRequestId: otpSession.providerRequestId,
+      providerStatusCode,
+      deliveryStatus: otpSession.deliveryStatus,
+      status: otpSession.status,
+      providerResponse: responseData,
+    });
 
     let user = await User.findOne({ phone: cleanPhone });
 
