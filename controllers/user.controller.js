@@ -203,6 +203,8 @@ const applyOtpSourceContext = (otpSession, sourceContext = {}) => {
   otpSession.sourceIpAddress = sourceContext.sourceIpAddress ?? otpSession.sourceIpAddress ?? null;
 };
 
+const getSignupSource = (sourceContext = {}) => sourceContext.source || "unknown";
+
 const recordOtpAction = async ({
   phone,
   actionType,
@@ -1069,6 +1071,7 @@ const verifyOTP = async (req, res) => {
       user = await User.create({
         phone: cleanPhone,
         loginType: "otp",
+        signupSource: getSignupSource(sourceContext),
         isVerified: true,
         fullName: null,
         email: null,
@@ -1189,6 +1192,7 @@ const googleSignIn = async (req, res) => {
         profileImage,
         phone: undefined,
         loginType: "google",
+        signupSource: getSignupSource(resolveOtpSourceContext(req)),
         isVerified: true,
         profileCompleted: Boolean(fullName && email),
       });
@@ -1304,6 +1308,7 @@ const completeUserProfile = async (req, res) => {
       user = await User.create({
         phone: targetPhone,
         loginType: "otp",
+        signupSource: getSignupSource(resolveOtpSourceContext(req)),
         isVerified: true,
         fullName: null,
         email: null,

@@ -1,6 +1,7 @@
 const {
   getOwnerAdmin,
   getCustomers,
+  deleteCustomer,
   getRewards,
   promoteManualReward,
   updateCustomerRewardBalance,
@@ -46,6 +47,7 @@ const adminRouter = require("express").Router();
 adminRouter.post("/login", loginAdmin);
 adminRouter.get("/owner", getOwnerAdmin);
 adminRouter.get("/customers", isAdminAuth, getCustomers);
+adminRouter.delete("/customers/:customerId", isAdminAuth, deleteCustomer);
 adminRouter.post("/customers/:customerId/manual-reward", isAdminAuth, promoteManualReward);
 adminRouter.patch("/customers/:customerId/reward-balance", isAdminAuth, updateCustomerRewardBalance);
 adminRouter.get("/otp-actions", isAdminAuth, getOtpActions);

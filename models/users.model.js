@@ -38,6 +38,12 @@ const userSchema = new mongoose.Schema(
       default: "otp",
       required: true,
     },
+    signupSource: {
+      type: String,
+      enum: ["app", "website", "unknown"],
+      default: "unknown",
+      index: true,
+    },
     profileImage: {
       type: String,
       default: null,

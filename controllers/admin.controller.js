@@ -256,7 +256,7 @@ const getCustomers = async (req, res) => {
   try {
     const users = await User.find()
       .select(
-        "_id fullName email phone isActive fcmToken signupBonusGranted rewardPoints walletBalance createdAt updatedAt",
+        "_id fullName email phone isActive fcmToken signupBonusGranted rewardPoints walletBalance signupSource createdAt updatedAt",
       )
       .sort({ createdAt: -1 });
     const shippingDocs = await ShippingInfo.find({
@@ -304,6 +304,7 @@ const getCustomers = async (req, res) => {
           hasFcmToken: Boolean(String(user.fcmToken || "").trim()),
           signupBonusGranted: Boolean(user.signupBonusGranted),
           welcomeBonusGranted: Boolean(user.signupBonusGranted),
+          signupSource: user.signupSource || "unknown",
           rewardPoints: getPointBalance(user),
           walletBalance: getPointBalance(user),
           shippingInfo: defaultAddress
@@ -326,15 +327,6 @@ const getCustomers = async (req, res) => {
           orderCount: stats.orderCount || 0,
           totalSpent: stats.totalSpent || 0,
         };
-      })
-      .sort((first, second) => {
-        const orderDelta = Number(second.orderCount || 0) - Number(first.orderCount || 0);
-
-        if (orderDelta !== 0) {
-          return orderDelta;
-        }
-
-        return new Date(second.createdAt || 0) - new Date(first.createdAt || 0);
       });
 
     return res.status(200).json({
@@ -349,6 +341,57 @@ const getCustomers = async (req, res) => {
       message: "An error occurred while fetching customers",
       error: error.message,
     });
+  }
+};
+
+const deleteCustomer = async (req, res) => {
+  const session = await mongoose.startSession();
+
+  try {
+    const { customerId } = req.params;
+
+    if (!mongoose.Types.ObjectId.isValid(customerId)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid customer id",
+      });
+    }
+
+    session.startTransaction();
+
+    const customer = await User.findById(customerId).session(session);
+
+    if (!customer) {
+      await session.abortTransaction();
+      return res.status(404).json({
+        success: false,
+        message: "Customer not found",
+      });
+    }
+
+    await ShippingInfo.deleteOne({ user: customer._id }).session(session);
+    await User.deleteOne({ _id: customer._id }).session(session);
+
+    await session.commitTransaction();
+
+    return res.status(200).json({
+      success: true,
+      message: "Customer deleted successfully",
+      data: {
+        customerId: customer._id,
+      },
+    });
+  } catch (error) {
+    await session.abortTransaction().catch(() => {});
+    console.error("Delete customer error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to delete customer",
+      error: error.message,
+    });
+  } finally {
+    session.endSession();
   }
 };
 
@@ -748,6 +791,7 @@ module.exports = {
   sendManualNotification,
   getNotificationRecipients,
   getCustomers,
+  deleteCustomer,
   getRewards,
   promoteManualReward,
   updateCustomerRewardBalance,
