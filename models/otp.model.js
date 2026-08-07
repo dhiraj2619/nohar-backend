@@ -44,6 +44,16 @@ const otpSchema = new mongoose.Schema(
       default: null,
       trim: true,
     },
+    appVersionCode: {
+      type: Number,
+      default: null,
+      index: true,
+    },
+    appVersionName: {
+      type: String,
+      default: null,
+      trim: true,
+    },
     status: {
       type: String,
       enum: ["pending", "verified", "expired"],

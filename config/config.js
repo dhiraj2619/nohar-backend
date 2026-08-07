@@ -29,6 +29,24 @@ const BREVO_SENDER_EMAIL =
   process.env.BREVO_SENDER_EMAIL || "noharcosmetics@gmail.com";
 const BREVO_SENDER_NAME = process.env.BREVO_SENDER_NAME || "Nohar Cosmetics";
 const ORDER_OWNER_EMAIL = process.env.ORDER_OWNER_EMAIL || "noharcosmetics@gmail.com";
+const parsePositiveInt = (value, fallback) => {
+  const parsed = Number.parseInt(String(value ?? "").trim(), 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+};
+const APP_LATEST_VERSION_CODE = parsePositiveInt(
+  process.env.APP_LATEST_VERSION_CODE,
+  15,
+);
+const MIN_OTP_APP_BUILD_CODE = parsePositiveInt(
+  process.env.MIN_OTP_APP_BUILD_CODE,
+  APP_LATEST_VERSION_CODE,
+);
+const APP_LATEST_VERSION_NAME =
+  process.env.APP_LATEST_VERSION_NAME || "1.1.12";
+const APP_FORCE_UPDATE = process.env.APP_FORCE_UPDATE || "true";
+const APP_PLAY_STORE_URL =
+  process.env.APP_PLAY_STORE_URL ||
+  "https://play.google.com/store/apps/details?id=com.nohar";
 
 module.exports = {
   PORT,
@@ -61,4 +79,9 @@ module.exports = {
   BREVO_SENDER_EMAIL,
   BREVO_SENDER_NAME,
   ORDER_OWNER_EMAIL,
+  APP_LATEST_VERSION_CODE,
+  MIN_OTP_APP_BUILD_CODE,
+  APP_LATEST_VERSION_NAME,
+  APP_FORCE_UPDATE,
+  APP_PLAY_STORE_URL,
 };

@@ -11,6 +11,7 @@ const {
   GOOGLE_WEB_CLIENT_ID,
   GOOGLE_ANDROID_CLIENT_ID,
   GOOGLE_CLIENT_IDS,
+  MIN_OTP_APP_BUILD_CODE,
   OTP_ROUTE,
   OTP_SENDER_ID,
   OTP_TEMPLATE_ID,
@@ -68,6 +69,11 @@ const maskPhone = (value) => {
   return `${digits.slice(0, 2)}****${digits.slice(-2)}`;
 };
 
+const normalizePositiveInt = (value) => {
+  const parsed = Number.parseInt(String(value ?? "").trim(), 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+};
+
 const summarizeVendorResponse = (data) => {
   if (data === undefined || data === null) {
     return data;
@@ -112,6 +118,45 @@ const isFast2SmsSuccess = (data, fallbackStatus) => {
 const getFast2SmsMessage = (data, fallbackMessage = "OTP provider request failed") =>
   data?.message || data?.error || data?.description || fallbackMessage;
 
+const APP_UPDATE_REQUIRED_MESSAGE =
+  "App update required. Please update the app to continue.";
+
+const getRequiredAppBuildCode = () =>
+  Number.isFinite(Number(MIN_OTP_APP_BUILD_CODE))
+    ? Number(MIN_OTP_APP_BUILD_CODE)
+    : 15;
+
+const getOtpAppBuildVersion = (sourceContext = {}) =>
+  sourceContext.appVersionCode || null;
+
+const buildAppVersionBlockDetails = (sourceContext = {}) => {
+  const requiredVersionCode = getRequiredAppBuildCode();
+  const appVersionCode = getOtpAppBuildVersion(sourceContext);
+
+  return {
+    blocked: true,
+    requiredVersionCode,
+    appVersionCode,
+    appVersionName: sourceContext.appVersionName || null,
+    message: APP_UPDATE_REQUIRED_MESSAGE,
+  };
+};
+
+const shouldBlockOtpForAppVersion = (sourceContext = {}) => {
+  if (sourceContext.source !== "app") {
+    return false;
+  }
+
+  const appVersionCode = getOtpAppBuildVersion(sourceContext);
+  const requiredVersionCode = getRequiredAppBuildCode();
+
+  if (!appVersionCode) {
+    return true;
+  }
+
+  return appVersionCode < requiredVersionCode;
+};
+
 const logOtpEvent = (event, details = {}) => {
   const payload = {
     at: new Date().toISOString(),
@@ -140,6 +185,34 @@ const normalizeOtpSource = (value) => {
   }
 
   return "unknown";
+};
+
+const extractAppVersionContext = (req = {}) => {
+  const rawVersionCode =
+    req.body?.versionCode ??
+    req.body?.buildNumber ??
+    req.body?.appVersionCode ??
+    req.headers?.["x-app-version-code"] ??
+    req.headers?.["x-client-version-code"] ??
+    req.headers?.["x-build-number"] ??
+    req.headers?.["x-version-code"] ??
+    null;
+  const rawVersionName =
+    req.body?.versionName ??
+    req.body?.appVersionName ??
+    req.headers?.["x-app-version-name"] ??
+    req.headers?.["x-client-version-name"] ??
+    req.headers?.["x-version-name"] ??
+    null;
+  const versionCode = normalizePositiveInt(rawVersionCode);
+  const versionName = String(rawVersionName || "").trim() || null;
+
+  return {
+    appVersionCode: versionCode,
+    appVersionName: versionName,
+    appVersionCodeRaw: rawVersionCode,
+    appVersionNameRaw: rawVersionName,
+  };
 };
 
 const inferOtpSourceFromUserAgent = (userAgent) => {
@@ -183,6 +256,7 @@ const resolveOtpSourceContext = (req) => {
     forwardedFor ||
     String(req.ip || req.socket?.remoteAddress || req.connection?.remoteAddress || "").trim() ||
     null;
+  const appVersionContext = extractAppVersionContext(req);
 
   const source = requestedSource
     ? normalizeOtpSource(requestedSource)
@@ -193,6 +267,7 @@ const resolveOtpSourceContext = (req) => {
     sourceRaw: requestedSource || null,
     sourceUserAgent: userAgent,
     sourceIpAddress: ipAddress,
+    ...appVersionContext,
   };
 };
 
@@ -201,6 +276,8 @@ const applyOtpSourceContext = (otpSession, sourceContext = {}) => {
   otpSession.sourceRaw = sourceContext.sourceRaw ?? otpSession.sourceRaw ?? null;
   otpSession.sourceUserAgent = sourceContext.sourceUserAgent ?? otpSession.sourceUserAgent ?? null;
   otpSession.sourceIpAddress = sourceContext.sourceIpAddress ?? otpSession.sourceIpAddress ?? null;
+  otpSession.appVersionCode = sourceContext.appVersionCode ?? otpSession.appVersionCode ?? null;
+  otpSession.appVersionName = sourceContext.appVersionName ?? otpSession.appVersionName ?? null;
 };
 
 const getSignupSource = (sourceContext = {}) => sourceContext.source || "unknown";
@@ -223,9 +300,11 @@ const recordOtpAction = async ({
       actionType,
       source: sourceContext.source || "unknown",
       sourceRaw: sourceContext.sourceRaw || null,
-      sourceUserAgent: sourceContext.sourceUserAgent || null,
-      sourceIpAddress: sourceContext.sourceIpAddress || null,
-      traceId,
+    sourceUserAgent: sourceContext.sourceUserAgent || null,
+    sourceIpAddress: sourceContext.sourceIpAddress || null,
+    appVersionCode: sourceContext.appVersionCode ?? null,
+    appVersionName: sourceContext.appVersionName || null,
+    traceId,
       providerRequestId,
       providerStatusCode,
       deliveryStatus,
@@ -558,6 +637,36 @@ const sendOTP = async (req, res) => {
       });
     }
 
+    if (shouldBlockOtpForAppVersion(sourceContext)) {
+      const blockDetails = buildAppVersionBlockDetails(sourceContext);
+
+      logOtpEvent("send:app_version_blocked", {
+        traceId,
+        source,
+        phone: maskPhone(cleanPhone),
+        appVersionCode: blockDetails.appVersionCode,
+        requiredVersionCode: blockDetails.requiredVersionCode,
+      });
+
+      await recordOtpAction({
+        phone: cleanPhone,
+        actionType: "send",
+        sourceContext,
+        traceId,
+        deliveryStatus: "blocked",
+        status: "blocked",
+        failureReason: blockDetails.message,
+        providerResponse: blockDetails,
+      });
+
+      return res.status(426).json({
+        success: false,
+        message: blockDetails.message,
+        requiredVersionCode: blockDetails.requiredVersionCode,
+        currentVersionCode: blockDetails.appVersionCode,
+      });
+    }
+
     let otpSession = await Otp.findOne({ phone: cleanPhone });
 
     if (otpSession && (otpSession.status === "verified" || isOtpWindowExpired(otpSession))) {
@@ -735,6 +844,36 @@ const resendOTP = async (req, res) => {
       return res.status(500).json({
         success: false,
         message: "OTP service is not configured",
+      });
+    }
+
+    if (shouldBlockOtpForAppVersion(sourceContext)) {
+      const blockDetails = buildAppVersionBlockDetails(sourceContext);
+
+      logOtpEvent("resend:app_version_blocked", {
+        traceId,
+        source,
+        phone: maskPhone(cleanPhone),
+        appVersionCode: blockDetails.appVersionCode,
+        requiredVersionCode: blockDetails.requiredVersionCode,
+      });
+
+      await recordOtpAction({
+        phone: cleanPhone,
+        actionType: "resend",
+        sourceContext,
+        traceId,
+        deliveryStatus: "blocked",
+        status: "blocked",
+        failureReason: blockDetails.message,
+        providerResponse: blockDetails,
+      });
+
+      return res.status(426).json({
+        success: false,
+        message: blockDetails.message,
+        requiredVersionCode: blockDetails.requiredVersionCode,
+        currentVersionCode: blockDetails.appVersionCode,
       });
     }
 

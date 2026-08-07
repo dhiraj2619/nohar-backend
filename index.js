@@ -24,6 +24,7 @@ const { userRouter } = require("./routes/user.route");
 const { shippingRouter } = require("./routes/shipping.route");
 const { paymentRouter } = require("./routes/payment.route");
 const { walletRouter } = require("./routes/wallet.route");
+const { appRouter } = require("./routes/app.route");
 const orderRouter = require("./routes/order.route");
 const { notificationRouter } = require("./routes/notification.route");
 const { locationRouter } = require("./routes/location.route");
@@ -81,6 +82,7 @@ app.use("/api/v1/wallet", walletRouter);
 app.use("/api/v1/orders", orderRouter);
 app.use("/api/v1/locations", locationRouter);
 app.use("/api/v1/leads", leadRouter);
+app.use("/api/v1/app", appRouter);
 
 // admin routes
 app.use("/api/v1/admin", adminRouter);

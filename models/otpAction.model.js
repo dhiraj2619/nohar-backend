@@ -35,6 +35,16 @@ const otpActionSchema = new mongoose.Schema(
       default: null,
       trim: true,
     },
+    appVersionCode: {
+      type: Number,
+      default: null,
+      index: true,
+    },
+    appVersionName: {
+      type: String,
+      default: null,
+      trim: true,
+    },
     traceId: {
       type: String,
       default: null,
