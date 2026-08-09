@@ -5,21 +5,14 @@ const escapeRegex = (value) =>
 
 const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
 
-const CSV_COLUMNS = [
-  ["createdAt", "Created At"],
-  ["phone", "Phone"],
-  ["actionType", "Action Type"],
-  ["source", "Source"],
-  ["status", "Status"],
-  ["deliveryStatus", "Delivery Status"],
-  ["providerRequestId", "Provider Request Id"],
-  ["providerStatusCode", "Provider Status Code"],
-  ["failureReason", "Failure Reason"],
-  ["appVersionCode", "App Version Code"],
-  ["appVersionName", "App Version Name"],
-  ["sourceIpAddress", "Source IP Address"],
-  ["sourceUserAgent", "Source User Agent"],
-  ["traceId", "Trace Id"],
+const REPORT_COLUMNS = [
+  ["phone", "Phone", 90],
+  ["source", "Source", 90],
+  ["actionType", "Action", 80],
+  ["status", "Status", 90],
+  ["providerRequestId", "Provider", 130],
+  ["createdAt", "When", 140],
+  ["context", "Context", 220],
 ];
 
 const escapeCsvValue = (value) => {
@@ -93,18 +86,281 @@ const buildDateRangeFilename = (from, to) => {
   return `otp-actions-${fromLabel || "from"}-to-${toLabel || "to"}`;
 };
 
+const formatDateTimeInIst = (value) =>
+  new Date(value).toLocaleString("en-IN", {
+    timeZone: "Asia/Kolkata",
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+
 const buildOtpActionsCsv = (actions = []) => {
-  const header = CSV_COLUMNS.map(([, label]) => escapeCsvValue(label)).join(",");
+  const header = REPORT_COLUMNS.map(([, label]) => escapeCsvValue(label)).join(",");
 
   const rows = actions.map((action) =>
-    CSV_COLUMNS.map(([field]) => {
-      const value = field === "createdAt" ? action?.createdAt : action?.[field];
+    REPORT_COLUMNS.map(([field]) => {
+      const value = getReportFieldValue(action, field);
 
       return escapeCsvValue(value);
     }).join(","),
   );
 
   return [header, ...rows].join("\r\n");
+};
+
+const getReportContext = (action = {}) =>
+  [
+    action?.sourceUserAgent,
+    action?.sourceIpAddress ? `IP ${action.sourceIpAddress}` : null,
+  ]
+    .filter(Boolean)
+    .join(" | ") || "-";
+
+const getReportFieldValue = (action = {}, field) => {
+  if (field === "context") {
+    return getReportContext(action);
+  }
+
+  if (field === "createdAt") {
+    return action?.createdAt ? formatDateTimeInIst(action.createdAt) : "";
+  }
+
+  if (field === "status") {
+    return action?.deliveryStatus || action?.status || "-";
+  }
+
+  if (field === "providerRequestId") {
+    return action?.providerRequestId || "-";
+  }
+
+  if (field === "source") {
+    return action?.source || "unknown";
+  }
+
+  if (field === "actionType") {
+    return action?.actionType || "-";
+  }
+
+  return action?.[field] || "-";
+};
+
+const PDF_PAGE_WIDTH = 842;
+const PDF_PAGE_HEIGHT = 595;
+const PDF_MARGIN = 24;
+const PDF_HEADER_HEIGHT = 54;
+const PDF_ROW_HEIGHT = 22;
+const PDF_ROWS_PER_PAGE = 20;
+
+const sanitizePdfText = (value) =>
+  String(value ?? "")
+    .replace(/\r?\n/g, " ")
+    .replace(/[^\x09\x20-\x7E]/g, "?");
+
+const escapePdfText = (value) =>
+  sanitizePdfText(value)
+    .replace(/\\/g, "\\\\")
+    .replace(/\(/g, "\\(")
+    .replace(/\)/g, "\\)");
+
+const pdfTopToBottomY = (topY, height = 0) => PDF_PAGE_HEIGHT - topY - height;
+
+const fitPdfText = (value, width, fontSize = 9) => {
+  const text = sanitizePdfText(value);
+  const averageCharWidth = fontSize * 0.5;
+  const maxChars = Math.max(6, Math.floor(width / averageCharWidth));
+
+  if (text.length <= maxChars) {
+    return text;
+  }
+
+  return `${text.slice(0, Math.max(0, maxChars - 3)).trimEnd()}...`;
+};
+
+const createPdfTextCommand = ({ x, topY, text, size = 9, font = "F1" }) => {
+  const y = pdfTopToBottomY(topY, size);
+
+  return `BT /${font} ${size} Tf 1 0 0 1 ${x} ${y} Tm (${escapePdfText(
+    text,
+  )}) Tj ET`;
+};
+
+const createPdfRectCommand = ({ x, topY, width, height }) => {
+  const y = pdfTopToBottomY(topY, height);
+
+  return `${x} ${y} ${width} ${height} re S`;
+};
+
+const buildPdfObjects = (pages) => {
+  const objects = [];
+  const addObject = (content) => {
+    objects.push(content);
+    return objects.length;
+  };
+
+  const fontRegularId = addObject(
+    "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+  );
+  const fontBoldId = addObject(
+    "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>",
+  );
+
+  const contentIds = pages.map((pageContent) =>
+    addObject(
+      `<< /Length ${Buffer.byteLength(pageContent, "latin1")} >>\nstream\n${pageContent}\nendstream`,
+    ),
+  );
+
+  const pageIds = pages.map((_, index) =>
+    addObject(
+      `<< /Type /Page /Parent __PAGES__ 0 R /MediaBox [0 0 ${PDF_PAGE_WIDTH} ${PDF_PAGE_HEIGHT}] /Resources << /Font << /F1 ${fontRegularId} 0 R /F2 ${fontBoldId} 0 R >> >> /Contents ${contentIds[index]} 0 R >>`,
+    ),
+  );
+
+  const pagesId = addObject(
+    `<< /Type /Pages /Kids [${pageIds.map((id) => `${id} 0 R`).join(" ")}] /Count ${pageIds.length} >>`,
+  );
+
+  const catalogId = addObject(`<< /Type /Catalog /Pages ${pagesId} 0 R >>`);
+
+  pageIds.forEach((pageId) => {
+    objects[pageId - 1] = objects[pageId - 1].replace("__PAGES__", String(pagesId));
+  });
+
+  return { objects, catalogId };
+};
+
+const buildPdfBuffer = (pages) => {
+  const { objects, catalogId } = buildPdfObjects(pages);
+  const offsets = [0];
+  const chunks = [];
+  let length = 0;
+
+  const pushChunk = (value) => {
+    const chunk = Buffer.from(value, "latin1");
+    chunks.push(chunk);
+    length += chunk.length;
+  };
+
+  pushChunk("%PDF-1.4\n");
+
+  objects.forEach((objectContent, index) => {
+    offsets.push(length);
+    pushChunk(`${index + 1} 0 obj\n${objectContent}\nendobj\n`);
+  });
+
+  const xrefStart = length;
+  pushChunk(`xref\n0 ${objects.length + 1}\n`);
+  pushChunk("0000000000 65535 f \n");
+
+  for (let index = 1; index <= objects.length; index += 1) {
+    pushChunk(`${String(offsets[index]).padStart(10, "0")} 00000 n \n`);
+  }
+
+  pushChunk(`trailer << /Size ${objects.length + 1} /Root ${catalogId} 0 R >>\n`);
+  pushChunk(`startxref\n${xrefStart}\n%%EOF`);
+
+  return Buffer.concat(chunks);
+};
+
+const buildOtpActionsPdf = (actions = [], meta = {}) => {
+  const effectiveRowsPerPage = PDF_ROWS_PER_PAGE;
+  const pageWidth = PDF_PAGE_WIDTH - PDF_MARGIN * 2;
+  const baseWidth = REPORT_COLUMNS.reduce((sum, [, , width]) => sum + width, 0);
+  const scale = baseWidth > 0 ? pageWidth / baseWidth : 1;
+  const columnWidths = REPORT_COLUMNS.map(([, , width]) => Math.floor(width * scale));
+  const widthDelta = pageWidth - columnWidths.reduce((sum, value) => sum + value, 0);
+  columnWidths[columnWidths.length - 1] += widthDelta;
+
+  const pages = [];
+  const pageCount = Math.max(1, Math.ceil(actions.length / effectiveRowsPerPage));
+
+  for (let pageIndex = 0; pageIndex < pageCount; pageIndex += 1) {
+    const pageActions = actions.slice(
+      pageIndex * effectiveRowsPerPage,
+      pageIndex * effectiveRowsPerPage + effectiveRowsPerPage,
+    );
+    const commands = [];
+    let topY = PDF_MARGIN;
+
+    commands.push(
+      createPdfTextCommand({
+        x: PDF_MARGIN,
+        topY,
+        text: "OTP Actions Report",
+        size: 18,
+        font: "F2",
+      }),
+    );
+    topY += 22;
+
+    const dateRangeText =
+      meta.from && meta.to
+        ? `From ${meta.from} to ${meta.to}`
+        : "All available OTP actions";
+
+    commands.push(
+      createPdfTextCommand({
+        x: PDF_MARGIN,
+        topY,
+        text: `${dateRangeText} | Generated at ${new Date().toLocaleString("en-IN", {
+          timeZone: "Asia/Kolkata",
+        })}`,
+        size: 9,
+      }),
+    );
+    topY += 18;
+
+    commands.push(
+      createPdfTextCommand({
+        x: PDF_MARGIN,
+        topY,
+        text: `Page ${pageIndex + 1} of ${pageCount}`,
+        size: 9,
+      }),
+    );
+    topY += 18;
+
+    REPORT_COLUMNS.forEach(([, label], columnIndex) => {
+      const x = PDF_MARGIN + columnWidths.slice(0, columnIndex).reduce((sum, value) => sum + value, 0);
+      commands.push(createPdfRectCommand({ x, topY, width: columnWidths[columnIndex], height: 20 }));
+      commands.push(
+        createPdfTextCommand({
+          x: x + 4,
+          topY: topY + 5,
+          text: label,
+          size: 9,
+          font: "F2",
+        }),
+      );
+    });
+    topY += 20;
+
+    pageActions.forEach((action) => {
+      const values = REPORT_COLUMNS.map(([field], columnIndex) =>
+        fitPdfText(getReportFieldValue(action, field) || "-", columnWidths[columnIndex] - 8),
+      );
+
+      REPORT_COLUMNS.forEach(([, , ], columnIndex) => {
+        const x = PDF_MARGIN + columnWidths.slice(0, columnIndex).reduce((sum, value) => sum + value, 0);
+        commands.push(createPdfRectCommand({ x, topY, width: columnWidths[columnIndex], height: PDF_ROW_HEIGHT }));
+        commands.push(
+          createPdfTextCommand({
+            x: x + 4,
+            topY: topY + 6,
+            text: values[columnIndex],
+            size: 8.5,
+          }),
+        );
+      });
+      topY += PDF_ROW_HEIGHT;
+    });
+
+    pages.push(commands.join("\n"));
+  }
+
+  return buildPdfBuffer(pages);
 };
 
 const getTodayRangeInIst = () => {
@@ -315,6 +571,7 @@ const wipeTodayOtpActions = async (_req, res) => {
 const getOtpActionsReport = async (req, res) => {
   try {
     const dateRange = buildDateRangeFromQuery(req.query);
+    const format = String(req.query.format || "csv").trim().toLowerCase();
 
     if (!dateRange) {
       return res.status(400).json({
@@ -325,11 +582,21 @@ const getOtpActionsReport = async (req, res) => {
 
     const filter = buildOtpActionQuery(req.query);
     const actions = await OtpAction.find(filter).sort({ createdAt: -1 }).lean();
-    const csv = buildOtpActionsCsv(actions);
-    const fileName = `${buildDateRangeFilename(req.query.from || req.query.start, req.query.to || req.query.end)}.csv`;
+    const fileBaseName = buildDateRangeFilename(
+      req.query.from || req.query.start,
+      req.query.to || req.query.end,
+    );
 
+    if (format === "pdf") {
+      const pdfBuffer = await buildOtpActionsPdf(actions, { from: req.query.from || req.query.start, to: req.query.to || req.query.end });
+      res.setHeader("Content-Type", "application/pdf");
+      res.setHeader("Content-Disposition", `attachment; filename="${fileBaseName}.pdf"`);
+      return res.status(200).send(pdfBuffer);
+    }
+
+    const csv = buildOtpActionsCsv(actions);
     res.setHeader("Content-Type", "text/csv; charset=utf-8");
-    res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
+    res.setHeader("Content-Disposition", `attachment; filename="${fileBaseName}.csv"`);
     return res.status(200).send(`\ufeff${csv}`);
   } catch (error) {
     console.error("Get OTP actions report error:", error.message);
@@ -404,3 +671,5 @@ module.exports = {
   wipeOtpActionsByDateRange,
   wipeAllOtpActions,
 };
+
+
