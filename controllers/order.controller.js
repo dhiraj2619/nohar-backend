@@ -2231,14 +2231,15 @@ const deleteAdminManualOrder = async (req, res) => {
       });
     }
 
-    const customer = await User.findById(order.user).session(session);
+    const customer = order.user
+      ? await User.findById(order.user).session(session)
+      : null;
 
     if (!customer) {
-      await session.abortTransaction();
-      return res.status(404).json({
-        success: false,
-        message: "Customer not found for this order",
-      });
+      console.warn(
+        "Deleting order without a linked customer record:",
+        order._id?.toString?.() || orderId,
+      );
     }
 
     const pointsUsed = Number(
@@ -2249,7 +2250,7 @@ const deleteAdminManualOrder = async (req, res) => {
         0,
     );
 
-    if (pointsUsed > 0) {
+    if (pointsUsed > 0 && customer) {
       const restoredBalance = getPointBalance(customer) + pointsUsed;
       syncPointBalance(customer, restoredBalance);
 
