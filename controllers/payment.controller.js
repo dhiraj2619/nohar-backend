@@ -4,6 +4,8 @@ const mongoose = require("mongoose");
 const Payment = require("../models/payment.model");
 const User = require("../models/users.model");
 
+const PAYMENT_RETENTION_DAYS = 15;
+
 const getRazorpayInstance = () => {
   if (!process.env.RAZORPAY_KEY_ID || !process.env.RAZORPAY_SECRET) {
     return null;
@@ -229,7 +231,19 @@ const markPaymentFailed = async (req, res) => {
 const getPayments = async (req, res) => {
   try {
     const { status, source, search } = req.query;
-    const filter = {};
+    const retentionCutoff = new Date();
+    retentionCutoff.setDate(retentionCutoff.getDate() - PAYMENT_RETENTION_DAYS);
+    retentionCutoff.setHours(0, 0, 0, 0);
+    const filter = {
+      $and: [
+        {
+          $or: [
+            { date: { $gte: retentionCutoff } },
+            { createdAt: { $gte: retentionCutoff } },
+          ],
+        },
+      ],
+    };
 
     if (status && status !== "all") {
       filter.status = String(status).trim().toUpperCase();
@@ -381,8 +395,17 @@ const syncRazorpayPayments = async (req, res) => {
     }
 
     const now = new Date();
-    const defaultFrom = new Date(now.getFullYear(), 0, 1);
-    const fromDate = parseSyncDate(req.body?.from || req.query?.from, defaultFrom);
+    const retentionCutoff = new Date(now);
+    retentionCutoff.setDate(retentionCutoff.getDate() - PAYMENT_RETENTION_DAYS);
+    retentionCutoff.setHours(0, 0, 0, 0);
+    const requestedFrom = parseSyncDate(
+      req.body?.from || req.query?.from,
+      retentionCutoff,
+    );
+    const fromDate =
+      requestedFrom.getTime() > retentionCutoff.getTime()
+        ? requestedFrom
+        : retentionCutoff;
     const toDate = parseSyncDate(req.body?.to || req.query?.to, now);
     const maxPages = Math.min(
       Math.max(Number(req.body?.maxPages || req.query?.maxPages || 20), 1),
@@ -490,12 +513,20 @@ const syncRazorpayPayments = async (req, res) => {
       skip += pageSize;
     }
 
+    const deleteResult = await Payment.deleteMany({
+      $or: [
+        { date: { $lt: retentionCutoff } },
+        { createdAt: { $lt: retentionCutoff } },
+      ],
+    });
+
     return res.status(200).json({
       success: true,
       message: "Razorpay payments synced",
       scanned,
       imported,
       updated,
+      deletedOlderPayments: deleteResult.deletedCount || 0,
       from: fromDate,
       to: toDate,
     });
