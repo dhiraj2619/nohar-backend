@@ -8,7 +8,13 @@ const {
   updateRewardTransaction,
   loginAdmin,
 } = require("../controllers/admin.controller");
-const { getOtpActions, wipeTodayOtpActions } = require("../controllers/otp.controller");
+const {
+  getOtpActions,
+  getOtpActionsReport,
+  wipeAllOtpActions,
+  wipeOtpActionsByDateRange,
+  wipeTodayOtpActions,
+} = require("../controllers/otp.controller");
 const {
   createAd,
   deleteAd,
@@ -51,6 +57,9 @@ adminRouter.delete("/customers/:customerId", isAdminAuth, deleteCustomer);
 adminRouter.post("/customers/:customerId/manual-reward", isAdminAuth, promoteManualReward);
 adminRouter.patch("/customers/:customerId/reward-balance", isAdminAuth, updateCustomerRewardBalance);
 adminRouter.get("/otp-actions", isAdminAuth, getOtpActions);
+adminRouter.get("/otp-actions/report", isAdminAuth, getOtpActionsReport);
+adminRouter.delete("/otp-actions/wipe-all", isAdminAuth, wipeAllOtpActions);
+adminRouter.delete("/otp-actions/wipe-range", isAdminAuth, wipeOtpActionsByDateRange);
 adminRouter.delete("/otp-actions/wipe-today", isAdminAuth, wipeTodayOtpActions);
 adminRouter.get("/rewards", isAdminAuth, getRewards);
 adminRouter.patch("/rewards/:transactionId", isAdminAuth, updateRewardTransaction);

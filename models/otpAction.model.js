@@ -83,6 +83,10 @@ const otpActionSchema = new mongoose.Schema(
   { timestamps: true },
 );
 
+otpActionSchema.index({ createdAt: -1 });
+
 const OtpAction = mongoose.model("OtpAction", otpActionSchema);
 
 module.exports = OtpAction;
+
+
