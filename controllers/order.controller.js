@@ -48,8 +48,8 @@ const DEFAULT_STORE_DETAILS = {
   allowPartial: false,
   partialPaymentType: "PERCENT",
   partialPaymentValue: 0,
-  freeShippingAbove: 0,
-  ordersAcceptedAbove: 0,
+  freeShippingAbove: 899,
+  ordersAcceptedAbove: 899,
   shippingCharges: 0,
   maintenanceMode: false,
 };
@@ -95,6 +95,8 @@ const normalizeOrderStatus = (status) => {
 
   return statusMap[normalized] || normalized;
 };
+
+const ACTIVE_ORDER_FILTER = { isDeleted: { $ne: true } };
 
 const applyOrderStatusSideEffects = (order, nextStatus) => {
   const now = new Date();
@@ -642,7 +644,7 @@ const buildInvoicePdf = async ({ order, customer, res }) => {
       ? normalizeCurrencyValue(storeDetails.ordersAcceptedAbove)
       : normalizeCurrencyValue(storeDetails?.freeShippingAbove) > 0
         ? normalizeCurrencyValue(storeDetails.freeShippingAbove)
-        : 499;
+        : 899;
   const configuredShippingCharge =
     normalizeCurrencyValue(storeDetails?.shippingCharges) > 0
       ? normalizeCurrencyValue(storeDetails.shippingCharges)
@@ -1980,7 +1982,10 @@ const getAdminOrderDetails = async (req, res) => {
   try {
     const { orderId } = req.params;
 
-    const order = await Order.findById(orderId).populate(
+    const order = await Order.findOne({
+      _id: orderId,
+      ...ACTIVE_ORDER_FILTER,
+    }).populate(
       "user",
       "_id fullName email phone",
     );
@@ -2005,7 +2010,10 @@ const getUserOrders = async (req, res) => {
   try {
     const { userId } = req.params;
 
-    const orders = await Order.find({ user: userId }).sort({ createdAt: -1 });
+    const orders = await Order.find({
+      user: userId,
+      ...ACTIVE_ORDER_FILTER,
+    }).sort({ createdAt: -1 });
 
     res.status(200).json({
       success: true,
@@ -2215,11 +2223,11 @@ const deleteAdminManualOrder = async (req, res) => {
       });
     }
 
-    if (String(order.adminOrderType || "").trim().toUpperCase() !== "MANUAL") {
+    if (order.isDeleted) {
       await session.abortTransaction();
       return res.status(403).json({
         success: false,
-        message: "Only admin manual orders can be deleted",
+        message: "Order is already deleted",
       });
     }
 
@@ -2263,18 +2271,21 @@ const deleteAdminManualOrder = async (req, res) => {
       await customer.save({ session });
     }
 
-    await Order.deleteOne({ _id: order._id }).session(session);
+    order.isDeleted = true;
+    order.deletedAt = new Date();
+    order.deletedBy = String(req.user?.email || req.user?.name || "admin").trim();
+    await order.save({ session });
     await session.commitTransaction();
 
     return res.status(200).json({
       success: true,
-      message: "Manual order deleted successfully",
+      message: "Order deleted successfully",
     });
   } catch (error) {
     await session.abortTransaction().catch(() => {});
     return res.status(500).json({
       success: false,
-      message: "Failed to delete manual order",
+      message: "Failed to delete order",
       error: error.message,
     });
   } finally {

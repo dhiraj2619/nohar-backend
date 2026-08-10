@@ -69,7 +69,7 @@ const buildPublicSettingsPayload = (settings) => ({
     settings?.freeShippingAbove !== undefined &&
     settings?.freeShippingAbove !== null
       ? Number(settings.freeShippingAbove)
-      : 0,
+      : 899,
   ordersAcceptedAbove:
     settings?.ordersAcceptedAbove !== undefined &&
     settings?.ordersAcceptedAbove !== null
@@ -77,7 +77,7 @@ const buildPublicSettingsPayload = (settings) => ({
       : settings?.freeShippingAbove !== undefined &&
           settings?.freeShippingAbove !== null
         ? Number(settings.freeShippingAbove)
-        : 0,
+        : 899,
   shippingCharges:
     settings?.shippingCharges !== undefined &&
     settings?.shippingCharges !== null

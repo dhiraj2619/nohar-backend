@@ -268,6 +268,11 @@ const getCustomers = async (req, res) => {
 
     const orderStats = await Order.aggregate([
       {
+        $match: {
+          isDeleted: { $ne: true },
+        },
+      },
+      {
         $group: {
           _id: "$user",
           orderCount: { $sum: 1 },

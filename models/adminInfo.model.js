@@ -65,12 +65,12 @@ const adminInfoSchema = new mongoose.Schema(
     },
     freeShippingAbove: {
       type: Number,
-      default: 0,
+      default: 899,
       min: 0,
     },
     ordersAcceptedAbove: {
       type: Number,
-      default: 0,
+      default: 899,
       min: 0,
     },
     shippingCharges: {

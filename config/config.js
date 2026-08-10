@@ -35,14 +35,14 @@ const parsePositiveInt = (value, fallback) => {
 };
 const APP_LATEST_VERSION_CODE = parsePositiveInt(
   process.env.APP_LATEST_VERSION_CODE,
-  15,
+  16,
 );
 const MIN_OTP_APP_BUILD_CODE = parsePositiveInt(
   process.env.MIN_OTP_APP_BUILD_CODE,
   APP_LATEST_VERSION_CODE,
 );
 const APP_LATEST_VERSION_NAME =
-  process.env.APP_LATEST_VERSION_NAME || "1.1.12";
+  process.env.APP_LATEST_VERSION_NAME || "1.1.13";
 const APP_FORCE_UPDATE = process.env.APP_FORCE_UPDATE || "true";
 const APP_PLAY_STORE_URL =
   process.env.APP_PLAY_STORE_URL ||
