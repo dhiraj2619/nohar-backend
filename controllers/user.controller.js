@@ -18,6 +18,7 @@ const {
 } = require("../config/config");
 const Otp = require("../models/otp.model");
 const OtpAction = require("../models/otpAction.model");
+const OtpBlockedIp = require("../models/otpBlockedIp.model");
 const User = require("../models/users.model");
 const { creditSignupBonus, getPointBalance } = require("../services/rewards.service");
 
@@ -28,6 +29,14 @@ const normalizeEmail = (value) => String(value || "").trim();
 const normalizePhone = (value) => {
   const digits = String(value || "").replace(/\D/g, "");
   return digits.length > 10 ? digits.slice(-10) : digits;
+};
+const normalizeRequestIp = (value) => {
+  const normalized = String(value || "")
+    .split(",")[0]
+    .trim()
+    .replace(/^::ffff:/i, "");
+
+  return normalized || null;
 };
 const normalizeAuthPhone = (body = {}) =>
   normalizePhone(body?.phone || body?.mobile || body?.mobileNumber || body?.phoneNumber);
@@ -253,9 +262,13 @@ const resolveOtpSourceContext = (req) => {
   const userAgent = String(req.headers?.["user-agent"] || "").trim().slice(0, 255) || null;
   const forwardedFor = String(req.headers?.["x-forwarded-for"] || "").split(",")[0].trim();
   const ipAddress =
-    forwardedFor ||
-    String(req.ip || req.socket?.remoteAddress || req.connection?.remoteAddress || "").trim() ||
-    null;
+    normalizeRequestIp(
+      forwardedFor ||
+        req.ip ||
+        req.socket?.remoteAddress ||
+        req.connection?.remoteAddress ||
+        "",
+    );
   const appVersionContext = extractAppVersionContext(req);
 
   const source = requestedSource
@@ -268,6 +281,87 @@ const resolveOtpSourceContext = (req) => {
     sourceUserAgent: userAgent,
     sourceIpAddress: ipAddress,
     ...appVersionContext,
+  };
+};
+
+const recordBlockedOtpAttempt = async ({
+  actionType,
+  phone,
+  sourceContext,
+  reason,
+}) => {
+  if (!["send", "resend", "verify"].includes(actionType)) {
+    return;
+  }
+
+  if (!phone) {
+    return;
+  }
+
+  try {
+    await OtpAction.create({
+      phone,
+      actionType,
+      source: sourceContext?.source || "unknown",
+      sourceRaw: sourceContext?.sourceRaw || null,
+      sourceUserAgent: sourceContext?.sourceUserAgent || null,
+      sourceIpAddress: sourceContext?.sourceIpAddress || null,
+      appVersionCode: sourceContext?.appVersionCode ?? null,
+      appVersionName: sourceContext?.appVersionName || null,
+      status: "blocked",
+      deliveryStatus: "blocked",
+      failureReason: reason || "IP blocked",
+      providerResponse: {
+        blocked: true,
+        reason: reason || "IP blocked",
+      },
+    });
+  } catch (error) {
+    console.error("Blocked OTP attempt record failed:", error.message);
+  }
+};
+
+const rejectIfBlockedOtpIp = async (req, res, actionType) => {
+  const sourceContext = resolveOtpSourceContext(req);
+  const sourceIpAddress = sourceContext.sourceIpAddress;
+
+  if (!sourceIpAddress) {
+    return { blocked: false, sourceContext };
+  }
+
+  const blockedIp = await OtpBlockedIp.findOne({
+    ipAddress: sourceIpAddress,
+    isBlocked: true,
+  }).lean();
+
+  if (!blockedIp) {
+    return { blocked: false, sourceContext };
+  }
+
+  const reason = blockedIp.reason || "Access blocked for this IP address";
+
+  await OtpBlockedIp.updateOne(
+    { _id: blockedIp._id },
+    {
+      $inc: { matchCount: 1 },
+      $set: {
+        lastMatchedAt: new Date(),
+      },
+    },
+  );
+
+  await recordBlockedOtpAttempt({
+    actionType,
+    phone: normalizeAuthPhone(req.body),
+    sourceContext,
+    reason,
+  });
+
+  return {
+    blocked: true,
+    sourceContext,
+    blockedIp,
+    reason,
   };
 };
 
@@ -557,6 +651,15 @@ const sendBrevoEmail = async ({ to, subject, text, html }) => {
 
 const checkUser = async (req, res) => {
   try {
+    const blockedCheck = await rejectIfBlockedOtpIp(req, res);
+
+    if (blockedCheck.blocked) {
+      return res.status(403).json({
+        success: false,
+        message: blockedCheck.reason || "Access blocked for this IP address",
+      });
+    }
+
     const cleanPhone = normalizeAuthPhone(req.body);
     const countryCode = normalizeAuthCountryCode(req.body);
 
@@ -597,6 +700,23 @@ const sendOTP = async (req, res) => {
   const source = sourceContext.source;
 
   try {
+    const blockedCheck = await rejectIfBlockedOtpIp(req, res, "send");
+
+    if (blockedCheck.blocked) {
+      logOtpEvent("send:ip_blocked", {
+        traceId,
+        source,
+        phone: maskPhone(req.body?.phone || req.body?.mobile),
+        sourceIpAddress: sourceContext.sourceIpAddress,
+        reason: blockedCheck.reason,
+      });
+
+      return res.status(403).json({
+        success: false,
+        message: blockedCheck.reason || "Access blocked for this IP address",
+      });
+    }
+
     const cleanPhone = normalizeAuthPhone(req.body);
     const now = new Date();
 
@@ -807,6 +927,23 @@ const resendOTP = async (req, res) => {
   const source = sourceContext.source;
 
   try {
+    const blockedCheck = await rejectIfBlockedOtpIp(req, res, "resend");
+
+    if (blockedCheck.blocked) {
+      logOtpEvent("resend:ip_blocked", {
+        traceId,
+        source,
+        phone: maskPhone(req.body?.phone || req.body?.mobile),
+        sourceIpAddress: sourceContext.sourceIpAddress,
+        reason: blockedCheck.reason,
+      });
+
+      return res.status(403).json({
+        success: false,
+        message: blockedCheck.reason || "Access blocked for this IP address",
+      });
+    }
+
     const cleanPhone = normalizeAuthPhone(req.body);
     const now = new Date();
 
@@ -1029,6 +1166,23 @@ const verifyOTP = async (req, res) => {
   const source = sourceContext.source;
 
   try {
+    const blockedCheck = await rejectIfBlockedOtpIp(req, res, "verify");
+
+    if (blockedCheck.blocked) {
+      logOtpEvent("verify:ip_blocked", {
+        traceId,
+        source,
+        phone: maskPhone(req.body?.phone || req.body?.mobile),
+        sourceIpAddress: sourceContext.sourceIpAddress,
+        reason: blockedCheck.reason,
+      });
+
+      return res.status(403).json({
+        success: false,
+        message: blockedCheck.reason || "Access blocked for this IP address",
+      });
+    }
+
     const { phone, otp } = req.body;
     const cleanPhone = normalizeAuthPhone(req.body);
     const cleanOtp = String(otp || "").replace(/\D/g, "").slice(0, 6);
@@ -1407,6 +1561,15 @@ const logoutUser = async (req, res) => {
 
 const completeUserProfile = async (req, res) => {
   try {
+    const blockedCheck = await rejectIfBlockedOtpIp(req, res);
+
+    if (blockedCheck.blocked) {
+      return res.status(403).json({
+        success: false,
+        message: blockedCheck.reason || "Access blocked for this IP address",
+      });
+    }
+
     const userId = req.user?._id;
     const { fullName, email, phone } = buildProfileCompletionPayload(req.body);
     const cleanEmail = normalizeEmail(email);

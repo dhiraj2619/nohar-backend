@@ -11,6 +11,10 @@ const {
 const {
   getOtpActions,
   getOtpActionsReport,
+  getBlockedOtpIps,
+  blockOtpIp,
+  updateBlockedOtpIp,
+  unblockOtpIp,
   wipeAllOtpActions,
   wipeOtpActionsByDateRange,
   wipeTodayOtpActions,
@@ -61,6 +65,10 @@ adminRouter.get("/otp-actions/report", isAdminAuth, getOtpActionsReport);
 adminRouter.delete("/otp-actions/wipe-all", isAdminAuth, wipeAllOtpActions);
 adminRouter.delete("/otp-actions/wipe-range", isAdminAuth, wipeOtpActionsByDateRange);
 adminRouter.delete("/otp-actions/wipe-today", isAdminAuth, wipeTodayOtpActions);
+adminRouter.get("/otp-ip-blocks", isAdminAuth, getBlockedOtpIps);
+adminRouter.post("/otp-ip-blocks", isAdminAuth, blockOtpIp);
+adminRouter.patch("/otp-ip-blocks/:blockedIpId", isAdminAuth, updateBlockedOtpIp);
+adminRouter.delete("/otp-ip-blocks/:blockedIpId", isAdminAuth, unblockOtpIp);
 adminRouter.get("/rewards", isAdminAuth, getRewards);
 adminRouter.patch("/rewards/:transactionId", isAdminAuth, updateRewardTransaction);
 adminRouter.get("/orders", isAdminAuth, getOrders);

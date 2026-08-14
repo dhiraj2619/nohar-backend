@@ -1,7 +1,70 @@
 const OtpAction = require("../models/otpAction.model");
+const OtpBlockedIp = require("../models/otpBlockedIp.model");
 
 const escapeRegex = (value) =>
   String(value || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+const normalizeIpAddress = (value) => {
+  const normalized = String(value || "")
+    .split(",")[0]
+    .trim()
+    .replace(/^::ffff:/i, "");
+
+  return normalized || null;
+};
+
+const normalizeBlockText = (value) => {
+  const normalized = String(value || "").trim();
+  return normalized.length ? normalized : null;
+};
+
+const buildBlockedIpFilter = (query = {}) => {
+  const filter = {};
+  const search = normalizeBlockText(query.search || query.q || query.ipAddress);
+
+  if (search) {
+    filter.ipAddress = { $regex: escapeRegex(search), $options: "i" };
+  }
+
+  if (query.status) {
+    const normalizedStatus = String(query.status || "").trim().toLowerCase();
+
+    if (normalizedStatus === "blocked") {
+      filter.isBlocked = true;
+    } else if (normalizedStatus === "unblocked") {
+      filter.isBlocked = false;
+    }
+  }
+
+  return filter;
+};
+
+const formatBlockedIp = (doc) => {
+  if (!doc) {
+    return null;
+  }
+
+  const value = typeof doc.toObject === "function" ? doc.toObject() : doc;
+
+  return {
+    id: value._id,
+    ipAddress: value.ipAddress,
+    reason: value.reason,
+    note: value.note,
+    isBlocked: value.isBlocked,
+    blockedBy: value.blockedBy,
+    blockedByEmail: value.blockedByEmail,
+    blockedAt: value.blockedAt,
+    unblockedAt: value.unblockedAt,
+    matchCount: value.matchCount,
+    lastMatchedAt: value.lastMatchedAt,
+    source: value.source,
+    sourceRaw: value.sourceRaw,
+    sourceUserAgent: value.sourceUserAgent,
+    createdAt: value.createdAt,
+    updatedAt: value.updatedAt,
+  };
+};
 
 const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
 
@@ -427,13 +490,21 @@ const getPositiveInt = (value, fallback, max = 100) => {
 
 const buildOtpActionQuery = (query = {}) => {
   const filter = {};
-  const phone = String(query.phone || "").replace(/\D/g, "");
+  const searchTerm = String(query.search || query.phone || "").trim();
+  const normalizedDigits = searchTerm.replace(/\D/g, "");
   const source = normalizeSourceFilter(query.source);
   const actionType = normalizeActionFilter(query.actionType || query.action);
   const dateRange = buildDateRangeFromQuery(query);
 
-  if (phone) {
-    filter.phone = { $regex: escapeRegex(phone), $options: "i" };
+  if (searchTerm) {
+    const searchRegex = { $regex: escapeRegex(searchTerm), $options: "i" };
+
+    filter.$or = [
+      { phone: searchRegex },
+      { sourceIpAddress: searchRegex },
+      { sourceUserAgent: searchRegex },
+      ...(normalizedDigits ? [{ phone: { $regex: escapeRegex(normalizedDigits), $options: "i" } }] : []),
+    ];
   }
 
   if (source) {
@@ -521,7 +592,7 @@ const getOtpActions = async (req, res) => {
         actionCounts,
       },
       filters: {
-        phone: String(req.query.phone || "").trim(),
+        search: String(req.query.search || req.query.phone || "").trim(),
         source: normalizeSourceFilter(req.query.source) || "all",
         actionType: normalizeActionFilter(req.query.actionType || req.query.action) || "all",
       },
@@ -664,12 +735,209 @@ const wipeAllOtpActions = async (_req, res) => {
   }
 };
 
+const getBlockedOtpIps = async (req, res) => {
+  try {
+    const page = Math.max(Number(req.query.page || 1), 1);
+    const limit = Math.min(Math.max(Number(req.query.limit || 25), 1), 100);
+    const skip = (page - 1) * limit;
+    const filter = buildBlockedIpFilter(req.query);
+
+    const [items, total] = await Promise.all([
+      OtpBlockedIp.find(filter).sort({ updatedAt: -1 }).skip(skip).limit(limit),
+      OtpBlockedIp.countDocuments(filter),
+    ]);
+
+    return res.status(200).json({
+      success: true,
+      message: "Blocked IPs fetched successfully",
+      data: items.map(formatBlockedIp),
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages: Math.max(1, Math.ceil(total / limit)),
+      },
+    });
+  } catch (error) {
+    console.error("Get blocked OTP IPs error:", error.message);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch blocked IPs",
+      error: error.message,
+    });
+  }
+};
+
+const blockOtpIp = async (req, res) => {
+  try {
+    const ipAddress = normalizeIpAddress(req.body?.ipAddress || req.body?.ip || req.body?.address);
+    const reason = normalizeBlockText(req.body?.reason);
+    const note = normalizeBlockText(req.body?.note);
+    const source = normalizeBlockText(req.body?.source) || "admin";
+
+    if (!ipAddress) {
+      return res.status(400).json({
+        success: false,
+        message: "IP address is required",
+      });
+    }
+
+    const sourceUserAgent = normalizeBlockText(req.body?.sourceUserAgent);
+    const blockedBy = normalizeBlockText(req.admin?.name || req.admin?.email || req.user?.name || "admin");
+    const blockedByEmail = normalizeBlockText(req.admin?.email || req.user?.email);
+
+    const blockedIp = await OtpBlockedIp.findOneAndUpdate(
+      { ipAddress },
+      {
+        $set: {
+          reason,
+          note,
+          isBlocked: true,
+          blockedBy,
+          blockedByEmail,
+          blockedAt: new Date(),
+          unblockedAt: null,
+          source,
+          sourceRaw: normalizeBlockText(req.body?.sourceRaw),
+          sourceUserAgent,
+        },
+        $inc: { matchCount: 0 },
+      },
+      { new: true, upsert: true, setDefaultsOnInsert: true },
+    );
+
+    return res.status(200).json({
+      success: true,
+      message: "IP blocked successfully",
+      data: formatBlockedIp(blockedIp),
+    });
+  } catch (error) {
+    console.error("Block OTP IP error:", error.message);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to block IP",
+      error: error.message,
+    });
+  }
+};
+
+const updateBlockedOtpIp = async (req, res) => {
+  try {
+    const blockedIpId = req.params?.blockedIpId;
+    const updates = {};
+
+    if (req.body?.ipAddress !== undefined) {
+      const normalizedIp = normalizeIpAddress(req.body.ipAddress);
+      if (!normalizedIp) {
+        return res.status(400).json({
+          success: false,
+          message: "Valid IP address is required",
+        });
+      }
+      updates.ipAddress = normalizedIp;
+    }
+
+    if (req.body?.reason !== undefined) {
+      updates.reason = normalizeBlockText(req.body.reason);
+    }
+
+    if (req.body?.note !== undefined) {
+      updates.note = normalizeBlockText(req.body.note);
+    }
+
+    if (req.body?.isBlocked !== undefined) {
+      updates.isBlocked = Boolean(req.body.isBlocked);
+      if (!updates.isBlocked) {
+        updates.unblockedAt = new Date();
+      } else {
+        updates.blockedAt = new Date();
+        updates.unblockedAt = null;
+      }
+    }
+
+    const updatedDoc = await OtpBlockedIp.findByIdAndUpdate(
+      blockedIpId,
+      { $set: updates },
+      { new: true },
+    );
+
+    if (!updatedDoc) {
+      return res.status(404).json({
+        success: false,
+        message: "Blocked IP not found",
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "Blocked IP updated successfully",
+      data: formatBlockedIp(updatedDoc),
+    });
+  } catch (error) {
+    console.error("Update blocked OTP IP error:", error.message);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to update blocked IP",
+      error: error.message,
+    });
+  }
+};
+
+const unblockOtpIp = async (req, res) => {
+  try {
+    const blockedIpId = req.params?.blockedIpId;
+    const adminName = normalizeBlockText(req.admin?.name || req.admin?.email || req.user?.name || "admin");
+    const adminEmail = normalizeBlockText(req.admin?.email || req.user?.email);
+
+    const updatedDoc = await OtpBlockedIp.findByIdAndUpdate(
+      blockedIpId,
+      {
+        $set: {
+          isBlocked: false,
+          unblockedAt: new Date(),
+          blockedBy: adminName,
+          blockedByEmail: adminEmail,
+        },
+      },
+      { new: true },
+    );
+
+    if (!updatedDoc) {
+      return res.status(404).json({
+        success: false,
+        message: "Blocked IP not found",
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "IP unblocked successfully",
+      data: formatBlockedIp(updatedDoc),
+    });
+  } catch (error) {
+    console.error("Unblock OTP IP error:", error.message);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to unblock IP",
+      error: error.message,
+    });
+  }
+};
+
 module.exports = {
   getOtpActions,
   wipeTodayOtpActions,
   getOtpActionsReport,
   wipeOtpActionsByDateRange,
   wipeAllOtpActions,
+  getBlockedOtpIps,
+  blockOtpIp,
+  updateBlockedOtpIp,
+  unblockOtpIp,
 };
 
 
