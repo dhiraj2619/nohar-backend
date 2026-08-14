@@ -488,6 +488,16 @@ const getPositiveInt = (value, fallback, max = 100) => {
   return Math.min(parsed, max);
 };
 
+const getActiveBlockedIpAddresses = async () => {
+  const blockedIps = await OtpBlockedIp.distinct("ipAddress", {
+    isBlocked: true,
+  });
+
+  return blockedIps
+    .map((ip) => normalizeIpAddress(ip))
+    .filter(Boolean);
+};
+
 const buildOtpActionQuery = (query = {}) => {
   const filter = {};
   const searchTerm = String(query.search || query.phone || "").trim();
@@ -525,12 +535,26 @@ const buildOtpActionQuery = (query = {}) => {
   return filter;
 };
 
+const applyBlockedIpExclusion = (filter = {}, blockedIps = []) => {
+  if (!Array.isArray(blockedIps) || blockedIps.length === 0) {
+    return filter;
+  }
+
+  return {
+    ...filter,
+    sourceIpAddress: {
+      $nin: blockedIps,
+    },
+  };
+};
+
 const getOtpActions = async (req, res) => {
   try {
     const page = getPositiveInt(req.query.page, 1, 1000);
     const limit = getPositiveInt(req.query.limit, 25, 100);
     const skip = (page - 1) * limit;
-    const filter = buildOtpActionQuery(req.query);
+    const blockedIps = await getActiveBlockedIpAddresses();
+    const filter = applyBlockedIpExclusion(buildOtpActionQuery(req.query), blockedIps);
 
     const [actions, totalCount, sourceSummary, actionSummary] = await Promise.all([
       OtpAction.find(filter).sort({ createdAt: -1 }).skip(skip).limit(limit).lean(),
@@ -651,7 +675,8 @@ const getOtpActionsReport = async (req, res) => {
       });
     }
 
-    const filter = buildOtpActionQuery(req.query);
+    const blockedIps = await getActiveBlockedIpAddresses();
+    const filter = applyBlockedIpExclusion(buildOtpActionQuery(req.query), blockedIps);
     const actions = await OtpAction.find(filter).sort({ createdAt: -1 }).lean();
     const fileBaseName = buildDateRangeFilename(
       req.query.from || req.query.start,
