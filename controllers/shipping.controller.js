@@ -116,7 +116,7 @@ const getShippingInfo = async (req, res) => {
 
 const updateAddress = async (req, res) => {
   try {
-    const { userId, addressId, updatedFields = {} } = req.body;
+    const { userId, addressId, updatedFields = {}, ...flatFields } = req.body;
     const finalUserId = userId || req.user?._id || req.user?.id;
 
     if (!finalUserId || !isValidObjectId(finalUserId) || !addressId) {
@@ -135,9 +135,24 @@ const updateAddress = async (req, res) => {
       });
     }
 
-    const addressIndex = shippingInfo.addresses.findIndex(
-      (address) => address._id.toString() === addressId,
-    );
+    const normalizedAddressId = String(addressId || "").trim();
+    const fallbackAddressKey = normalizedAddressId;
+
+    const getAddressKey = (address) =>
+      String(
+        address?._id ||
+          `${address?.flatNo || ""}-${address?.pincode || ""}-${address?.mobile || ""}`,
+      );
+
+    const addressIndex = shippingInfo.addresses.findIndex((address) => {
+      const currentId = String(address._id);
+      const currentLegacyKey = getAddressKey(address);
+
+      return (
+        currentId === normalizedAddressId ||
+        currentLegacyKey === fallbackAddressKey
+      );
+    });
 
     if (addressIndex === -1) {
       return res.status(404).json({
@@ -146,13 +161,21 @@ const updateAddress = async (req, res) => {
       });
     }
 
-    if (updatedFields.isDefault === true) {
+    const nextFields = {
+      ...flatFields,
+      ...updatedFields,
+    };
+
+    if (nextFields.isDefault === true) {
       shippingInfo.addresses.forEach((address) => {
         address.isDefault = false;
       });
     }
 
-    Object.assign(shippingInfo.addresses[addressIndex], updatedFields);
+    delete nextFields.userId;
+    delete nextFields.addressId;
+
+    Object.assign(shippingInfo.addresses[addressIndex], nextFields);
 
     await shippingInfo.save();
 
