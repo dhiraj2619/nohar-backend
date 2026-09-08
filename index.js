@@ -26,7 +26,7 @@ const { paymentRouter } = require("./routes/payment.route");
 const { walletRouter } = require("./routes/wallet.route");
 const { appRouter } = require("./routes/app.route");
 const orderRouter = require("./routes/order.route");
-const { notificationRouter } = require("./routes/notification.route");
+const { broadcastRouter } = require("./routes/broadcast.route");
 const { locationRouter } = require("./routes/location.route");
 const { leadRouter } = require("./routes/lead.route");
 const { initializeFirebase } = require("./services/notification.service");
@@ -86,7 +86,7 @@ app.use("/api/v1/app", appRouter);
 
 // admin routes
 app.use("/api/v1/admin", adminRouter);
-app.use("/api/v1/admin/notifications", notificationRouter);
+app.use("/api/v1/admin/broadcasts", broadcastRouter);
 
 app.listen(port, () => {
   console.log(`server is running on http://localhost:${port}`);
@@ -132,5 +132,4 @@ setInterval(
   },
   Number(process.env.REWARD_SETTLEMENT_SWEEP_MS || 60 * 1000),
 );
-
 
