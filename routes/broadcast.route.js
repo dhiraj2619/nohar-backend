@@ -25,4 +25,7 @@ broadcastRouter.get("/:id", getBroadcast);
 broadcastRouter.post("/", uploadImage, createBroadcast);
 broadcastRouter.patch("/:id", uploadImage, updateBroadcast);
 broadcastRouter.delete("/:id", deleteBroadcast);
-module.exports = { broadcastRouter };
+const publicBroadcastRouter = express.Router();
+publicBroadcastRouter.get("/", getBroadcasts);
+
+module.exports = { broadcastRouter, publicBroadcastRouter };
