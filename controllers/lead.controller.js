@@ -14,8 +14,10 @@ const allowedLeadTypes = [
 ];
 
 const getPagination = (query) => {
-  const page = Math.max(Number(query.page || 1), 1);
-  const limit = Math.min(Math.max(Number(query.limit || 30), 1), 100);
+  const requestedPage = Number(query.page);
+  const requestedLimit = Number(query.limit);
+  const page = Number.isSafeInteger(requestedPage) && requestedPage > 0 ? requestedPage : 1;
+  const limit = Number.isSafeInteger(requestedLimit) && requestedLimit > 0 ? Math.min(requestedLimit, 100) : 30;
 
   return {
     page,
@@ -26,8 +28,12 @@ const getPagination = (query) => {
 
 const syncCartLead = async (req, res) => {
   try {
+    if (!Array.isArray(req.body?.items)) {
+      return res.status(400).json({ success: false, message: "Cart items must be an array" });
+    }
     const lead = await syncUserCartLead({
       user: req.user,
+      guestCartToken: req.body?.guestCartToken,
       items: req.body?.items,
       source: req.body?.source || "web",
     });
@@ -50,6 +56,7 @@ const clearCartLead = async (req, res) => {
   try {
     const lead = await syncUserCartLead({
       user: req.user,
+      guestCartToken: req.body?.guestCartToken,
       items: [],
       source: req.body?.source || "web",
     });
@@ -121,6 +128,7 @@ const createWhatsAppLeadController = async (req, res) => {
 
 const getLeads = async (req, res) => {
   try {
+    await markStaleCartsAbandoned(process.env.CART_ABANDON_MINUTES || 60);
     const { page, limit, skip } = getPagination(req.query);
     const filter = {};
 
@@ -133,7 +141,7 @@ const getLeads = async (req, res) => {
     }
 
     if (req.query.search) {
-      const search = String(req.query.search).trim();
+      const search = String(req.query.search).trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
       filter.$or = [
         { contact: { $regex: search, $options: "i" } },
         { customerName: { $regex: search, $options: "i" } },

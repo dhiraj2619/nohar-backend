@@ -54,6 +54,11 @@ const leadSchema = new mongoose.Schema(
       index: true,
       default: "",
     },
+    guestCartHash: {
+      type: String,
+      index: true,
+      select: false,
+    },
     customerName: {
       type: String,
       trim: true,

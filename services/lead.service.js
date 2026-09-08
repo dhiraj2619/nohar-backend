@@ -1,4 +1,5 @@
 const Lead = require("../models/lead.model");
+const { createHash } = require("node:crypto");
 
 const normalizePhone = (value) => {
   const digits = String(value || "").replace(/\D/g, "");
@@ -14,8 +15,12 @@ const normalizeSource = (value) => {
 const getCustomerName = (user, fallback = {}) =>
   user?.fullName || user?.name || fallback.customerName || fallback.fullName || "";
 
-const getItemProduct = (item = {}) =>
-  item.product || item.productId || item._id || item.id || null;
+const getItemProduct = (item = {}) => {
+  const product = item.product || item.productId || item._id || item.id;
+  return product && typeof product === "object"
+    ? product._id || product.id || null
+    : product || null;
+};
 
 const getItemName = (item = {}) =>
   item.name ||
@@ -41,15 +46,15 @@ const getItemImage = (item = {}) => {
 };
 
 const getItemPrice = (item = {}) => {
-  const price = Number(item?.price || item?.finalPrice || item?.discountprice || 0);
+  const price = Number(item?.finalPrice ?? item?.discountprice ?? item?.price ?? 0);
 
-  return Number.isNaN(price) ? 0 : price;
+  return Number.isFinite(price) ? Math.max(price, 0) : 0;
 };
 
 const getItemQuantity = (item = {}) => {
-  const quantity = Number(item?.quantity || item?.qty || 1);
+  const quantity = Number(item?.quantity ?? item?.qty ?? 1);
 
-  return Number.isNaN(quantity) ? 1 : quantity;
+  return Number.isFinite(quantity) ? Math.max(quantity, 0) : 0;
 };
 
 const getCartItemSnapshots = (items = []) =>
@@ -75,32 +80,39 @@ const getOrderValue = (items = []) =>
     return total + price * quantity;
   }, 0);
 
-const syncUserCartLead = async ({ user, items, source = "unknown" }) => {
+const syncUserCartLead = async ({ user, guestCartToken, items, source = "unknown" }) => {
+  const guestCartHash = /^[a-f0-9]{64}$/i.test(String(guestCartToken || ""))
+    ? createHash("sha256").update(guestCartToken).digest("hex")
+    : null;
+  if (!user?._id && !guestCartHash) throw new Error("Cart identity is required");
+  const identity = user?._id ? { user: user._id } : { guestCartHash, user: null };
+  const clearMergedGuest = async () => {
+    if (user?._id && guestCartHash) {
+      await Lead.deleteMany({ guestCartHash, user: null, leadType: { $in: ["ACTIVE_CART", "ABANDONED_CART"] } });
+    }
+  };
   const orderValue = Number(getOrderValue(items).toFixed(2));
   const cartItems = getCartItemSnapshots(items);
 
-  await Lead.deleteMany({
-    user: user._id,
-    leadType: "ABANDONED_CART",
-  });
-
   if (!Array.isArray(items) || items.length === 0 || orderValue <= 0) {
     await Lead.deleteMany({
-      user: user._id,
-      leadType: "ACTIVE_CART",
+      ...identity,
+      leadType: { $in: ["ACTIVE_CART", "ABANDONED_CART"] },
     });
+    await clearMergedGuest();
 
     return null;
   }
 
-  return Lead.findOneAndUpdate(
+  const lead = await Lead.findOneAndUpdate(
     {
-      user: user._id,
-      leadType: "ACTIVE_CART",
+      ...identity,
+      leadType: { $in: ["ACTIVE_CART", "ABANDONED_CART"] },
     },
     {
       $set: {
-        contact: normalizePhone(user.phone),
+        leadType: "ACTIVE_CART",
+        contact: normalizePhone(user?.phone),
         customerName: getCustomerName(user),
         lastUpdatedCartOn: new Date(),
         orderValue,
@@ -114,50 +126,26 @@ const syncUserCartLead = async ({ user, items, source = "unknown" }) => {
       setDefaultsOnInsert: true,
     },
   );
+  // Remove the anonymous copy only after the customer's cart saved successfully.
+  await clearMergedGuest();
+  return lead;
 };
 
 const markStaleCartsAbandoned = async (inactiveMinutes = 60) => {
   const minutes = Number(inactiveMinutes);
   const cutoff = new Date(
-    Date.now() - (Number.isNaN(minutes) ? 60 : minutes) * 60 * 1000,
+    Date.now() - (Number.isFinite(minutes) && minutes > 0 ? minutes : 60) * 60 * 1000,
   );
 
-  const staleActiveCarts = await Lead.find({
+  const result = await Lead.updateMany({
     leadType: "ACTIVE_CART",
     lastUpdatedCartOn: { $lte: cutoff },
     orderValue: { $gt: 0 },
-  });
-
-  await Promise.all(
-    staleActiveCarts.map(async (lead) => {
-      await Lead.findOneAndUpdate(
-        {
-          user: lead.user,
-          leadType: "ABANDONED_CART",
-        },
-        {
-          $set: {
-            contact: lead.contact,
-            customerName: lead.customerName,
-            lastUpdatedCartOn: lead.lastUpdatedCartOn,
-            orderValue: lead.orderValue,
-            cartItems: lead.cartItems,
-            source: lead.source,
-          },
-        },
-        {
-          upsert: true,
-          setDefaultsOnInsert: true,
-        },
-      );
-
-      await Lead.deleteOne({ _id: lead._id });
-    }),
-  );
+  }, { $set: { leadType: "ABANDONED_CART" } });
 
   return {
     cutoff,
-    modifiedCount: staleActiveCarts.length,
+    modifiedCount: result.modifiedCount,
   };
 };
 
