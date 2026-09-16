@@ -4,6 +4,7 @@ const {
   clearCartLead,
   createWhatsAppLeadController,
   getLeads,
+  deleteLead,
   syncCartLead,
 } = require("../controllers/lead.controller");
 const { isAdminAuth, isAuth } = require("../middlewares/auth.middleware");
@@ -24,6 +25,7 @@ leadRouter.post("/cart/clear", cartAuth, clearCartLead);
 leadRouter.post("/whatsapp", createWhatsAppLeadController);
 
 leadRouter.get("/", isAdminAuth, getLeads);
+leadRouter.delete("/:id", isAdminAuth, deleteLead);
 leadRouter.post("/abandon-stale-carts", isAdminAuth, abandonStaleCartLeads);
 
 module.exports = { leadRouter };

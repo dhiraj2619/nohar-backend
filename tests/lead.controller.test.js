@@ -48,7 +48,7 @@ test("malformed cart sync rejects without calling cart service", async () => {
 
 test("guest cart access requires its secret and supplied auth always gets verified", () => {
   const routes = {};
-  const router = { post(path, ...handlers) { routes[path] = handlers; }, get() {} };
+  const router = { post(path, ...handlers) { routes[path] = handlers; }, get() {}, delete() {} };
   let authenticated = 0;
   const context = { module: { exports: {} }, require: (name) => {
     if (name === "express") return { Router: () => router };

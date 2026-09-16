@@ -182,7 +182,21 @@ const getLeads = async (req, res) => {
   }
 };
 
+const deleteLead = async (req, res) => {
+  if (!/^[a-f\d]{24}$/i.test(String(req.params.id || ""))) {
+    return res.status(400).json({ success: false, message: "Invalid lead ID" });
+  }
+  try {
+    const lead = await Lead.findByIdAndDelete(req.params.id);
+    if (!lead) return res.status(404).json({ success: false, message: "Lead not found" });
+    return res.status(200).json({ success: true, message: "Lead deleted successfully" });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: "Failed to delete lead" });
+  }
+};
+
 module.exports = {
+  deleteLead,
   abandonStaleCartLeads,
   clearCartLead,
   createWhatsAppLeadController,
