@@ -123,6 +123,11 @@ const productSchema = new mongoose.Schema(
       min: 0,
       max: 5,
     },
+    rewardPoints: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
     emiAvailable: {
       type: Boolean,
       default: false,

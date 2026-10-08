@@ -111,6 +111,7 @@ const normalizeProductPersistenceFields = (product) => ({
   gstIncluded:
     product.gstIncluded !== undefined ? Boolean(product.gstIncluded) : true,
   discountprice: toNumber(product.discountprice, 0),
+  rewardPoints: toNumber(product.rewardPoints, 0),
   finalPrice: toNumber(product.finalPrice, 0),
   insideStock:
     product.insideStock !== undefined ? Boolean(product.insideStock) : true,
@@ -215,6 +216,7 @@ const createProduct = async (req, res) => {
       offers,
       productReviews,
       ratings,
+      rewardPoints,
       emiAvailable,
       emiStartsAt,
       insideStock,
@@ -339,6 +341,7 @@ const createProduct = async (req, res) => {
       collectionId,
       productReviews: parseArrayField(productReviews, []),
       ratings: toNumber(ratings, 0),
+      rewardPoints: toNumber(rewardPoints, 0),
       emiAvailable: toBoolean(emiAvailable),
       emiStartsAt: toNumber(emiStartsAt, 0),
       insideStock:
@@ -396,6 +399,7 @@ const updateProduct = async (req, res) => {
       offers,
       productReviews,
       ratings,
+      rewardPoints,
       emiAvailable,
       emiStartsAt,
       insideStock,
@@ -599,6 +603,8 @@ const updateProduct = async (req, res) => {
     }
     if (ratings !== undefined)
       product.ratings = toNumber(ratings, product.ratings);
+    if (rewardPoints !== undefined)
+      product.rewardPoints = toNumber(rewardPoints, product.rewardPoints);
     if (emiAvailable !== undefined)
       product.emiAvailable = toBoolean(emiAvailable);
     if (emiStartsAt !== undefined)
