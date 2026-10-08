@@ -13,7 +13,6 @@ const AdminInfo = require("../models/adminInfo.model");
 const User = require("../models/users.model");
 const { markCartConverted } = require("../services/lead.service");
 const {
-  calculateOrderRewardPoints,
   earnRewardPoints,
   getPointBalance,
   syncPointBalance,
@@ -455,6 +454,7 @@ const normalizeInvoiceItem = (item = {}, product = {}) => {
       typeof item?.hsnCode === "string" && item.hsnCode.trim()
         ? item.hsnCode.trim()
         : String(product?.hsnCode || productFromItem?.hsnCode || "").trim(),
+    rewardPoints: Math.max(0, Number(product?.rewardPoints || 0)),
   };
 };
 
@@ -1150,15 +1150,14 @@ const notifyOrderUser = async (userId, order, status) => {
 
 const runPostOrderTasks = ({ userId, order, customer, customerEmail }) => {
   setImmediate(async () => {
-    const rewardAmount = Number(order.totalPrice || 0);
-    const rewardPoints = calculateOrderRewardPoints(rewardAmount);
+    const rewardPoints = Math.max(0, Number(order.rewardPointsEarned || 0));
 
     await Promise.allSettled([
       notifyOrderUser(userId, order, "ORDER_PLACED"),
       rewardPoints > 0
         ? earnRewardPoints({
             userId,
-            amount: rewardAmount,
+            points: rewardPoints,
             orderId: order._id,
           })
         : Promise.resolve(null),
@@ -1279,7 +1278,7 @@ const createAdminManualOrder = async (req, res) => {
 
     const orderedProducts = await Product.find({ _id: { $in: productIds } })
       .select(
-        "_id name price finalPrice discountprice images guideImage gstRate gst hsnCode insideStock",
+        "_id name price finalPrice discountprice images guideImage gstRate gst hsnCode insideStock rewardPoints",
       )
       .session(session)
       .lean();
@@ -1782,7 +1781,7 @@ const createOrder = async (req, res) => {
 
     const orderedProducts = await Product.find({ _id: { $in: productIds } })
       .select(
-        "_id name price finalPrice discountprice images guideImage gstRate gst hsnCode insideStock",
+        "_id name price finalPrice discountprice images guideImage gstRate gst hsnCode insideStock rewardPoints",
       )
       .lean();
     const productById = new Map(
@@ -1827,6 +1826,14 @@ const createOrder = async (req, res) => {
       );
     });
 
+    const rewardPointsEarned = normalizedOrderItems.reduce(
+      (total, item) =>
+        total +
+        Math.max(0, Number(item.rewardPoints || 0)) *
+          Math.max(1, Number(item.quantity || 1)),
+      0,
+    );
+
     session.startTransaction();
 
     const order = new Order({
@@ -1836,6 +1843,7 @@ const createOrder = async (req, res) => {
       bookingSource: normalizedBookingSource,
       totalPrice: normalizedTotal,
       originalTotalPrice: resolvedOriginalTotal,
+      rewardPointsEarned,
       pointsUsed: pointsToUse,
       walletAmountUsed: pointsToUse,
       walletAppliedAmount: pointsToUse,

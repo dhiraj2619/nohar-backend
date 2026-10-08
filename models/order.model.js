@@ -33,6 +33,11 @@ const orderItemSchema = new mongoose.Schema(
       default: "",
       trim: true,
     },
+    rewardPoints: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
   },
   { _id: false },
 );
@@ -155,6 +160,11 @@ const orderSchema = new mongoose.Schema(
     originalTotalPrice: {
       type: Number,
       required: true,
+      default: 0,
+      min: 0,
+    },
+    rewardPointsEarned: {
+      type: Number,
       default: 0,
       min: 0,
     },

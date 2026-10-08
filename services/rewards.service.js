@@ -5,7 +5,6 @@ const User = require("../models/users.model");
 const SIGNUP_BONUS_VALID_DAYS = 30;
 const ORDER_REWARD_MATURITY_MINUTES = 10;
 const DEFAULT_SIGNUP_BONUS_AMOUNT = 50;
-const ORDER_REWARD_POINTS_PER_100 = 2;
 const REWARD_TRANSACTION_TYPES = [
   "SIGNUP_BONUS",
   "ORDER_REWARD",
@@ -82,22 +81,12 @@ const creditSignupBonus = async (userId) => {
   return tx;
 };
 
-const calculateOrderRewardPoints = (amount) => {
-  const numericAmount = Number(amount || 0);
-
-  if (!Number.isFinite(numericAmount) || numericAmount <= 0) {
-    return 0;
-  }
-
-  return Math.floor(numericAmount / 100) * ORDER_REWARD_POINTS_PER_100;
-};
-
-const earnRewardPoints = async ({ userId, amount, orderId }) => {
+const earnRewardPoints = async ({ userId, points: configuredPoints, orderId }) => {
   const user = await User.findById(userId);
 
   if (!user) return null;
 
-  const points = calculateOrderRewardPoints(amount);
+  const points = normalizePointValue(configuredPoints);
 
   if (points <= 0) return null;
 
@@ -210,7 +199,6 @@ const settleMaturedOrderRewards = async () => {
 
 module.exports = {
   creditSignupBonus,
-  calculateOrderRewardPoints,
   earnRewardPoints,
   getPointBalance,
   redeemPoints,
