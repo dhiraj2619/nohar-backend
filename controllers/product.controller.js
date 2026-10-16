@@ -5,6 +5,11 @@ const Product = require("../models/products.model");
 const Category = require("../models/categories.model");
 const Collection = require("../models/collection.model");
 const Offer = require("../models/offers.model");
+const {
+  slugify,
+  isSlugTaken,
+  generateUniqueSlug,
+} = require("../services/slug.service");
 
 const toBoolean = (value) => {
   if (typeof value === "boolean") return value;
@@ -125,7 +130,6 @@ const normalizeSeoFields = (seo = {}) => ({
   titleTag: typeof seo.titleTag === "string" ? seo.titleTag.trim() : "",
   metaDescription:
     typeof seo.metaDescription === "string" ? seo.metaDescription.trim() : "",
-  keywords: typeof seo.keywords === "string" ? seo.keywords.trim() : "",
   canonicalUrl:
     typeof seo.canonicalUrl === "string" ? seo.canonicalUrl.trim() : "",
   metaRobots:
@@ -164,7 +168,6 @@ const getProductSeoFromBody = (body = {}) =>
   normalizeSeoFields({
     titleTag: body.seoTitle ?? body.titleTag,
     metaDescription: body.seoDescription ?? body.metaDescription,
-    keywords: body.seoKeywords ?? body.keywords,
     canonicalUrl: body.seoCanonicalUrl ?? body.canonicalUrl,
     metaRobots: body.seoRobots ?? body.metaRobots,
   });
@@ -282,6 +285,17 @@ const createProduct = async (req, res) => {
       }
     }
 
+    const requestedSlug = slugify(req.body.slug);
+
+    if (requestedSlug && (await isSlugTaken(Product, requestedSlug))) {
+      return res.status(409).json({
+        success: false,
+        message: `Product URL "${requestedSlug}" is already used by another product`,
+      });
+    }
+
+    const slug = requestedSlug || (await generateUniqueSlug(Product, name));
+
     const productImageFiles = getProductImageFiles(req.files);
 
     if (!productImageFiles.length) {
@@ -324,6 +338,7 @@ const createProduct = async (req, res) => {
 
     const newProduct = await Product.create({
       name: name.trim(),
+      slug,
       description,
       price: normalizedPrice,
       hsnCode: typeof hsnCode === "string" ? hsnCode.trim() : "",
@@ -467,6 +482,25 @@ const updateProduct = async (req, res) => {
           });
         }
       }
+    }
+
+    const requestedSlug = slugify(req.body.slug);
+
+    if (requestedSlug) {
+      if (await isSlugTaken(Product, requestedSlug, product._id)) {
+        return res.status(409).json({
+          success: false,
+          message: `Product URL "${requestedSlug}" is already used by another product`,
+        });
+      }
+
+      product.slug = requestedSlug;
+    } else if (!product.slug) {
+      product.slug = await generateUniqueSlug(
+        Product,
+        name ?? product.name,
+        product._id,
+      );
     }
 
     const newProductImageFiles = getProductImageFiles(req.files);
@@ -624,10 +658,6 @@ const updateProduct = async (req, res) => {
         req.body.seoDescription !== undefined
           ? req.body.seoDescription
           : product.seo?.metaDescription,
-      seoKeywords:
-        req.body.seoKeywords !== undefined
-          ? req.body.seoKeywords
-          : product.seo?.keywords,
       seoCanonicalUrl:
         req.body.seoCanonicalUrl !== undefined
           ? req.body.seoCanonicalUrl
@@ -869,18 +899,15 @@ const getProductsByCategories = async (req, res) => {
   }
 };
 
+// Accepts either a Mongo id or a product slug, so old id-based URLs keep working.
 const getProductById = async (req, res) => {
   try {
     const { id } = req.params;
+    const query = mongoose.isObjectIdOrHexString(id)
+      ? { _id: id }
+      : { slug: slugify(id) };
 
-    if (!mongoose.Types.ObjectId.isValid(id)) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid product id",
-      });
-    }
-
-    const product = await Product.findById(id)
+    const product = await Product.findOne(query)
       .populate("categoryId", "name")
       .populate("collectionId", "name")
       .populate("offers");
