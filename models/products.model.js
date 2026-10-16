@@ -164,16 +164,6 @@ const productSchema = new mongoose.Schema(
         default: "",
         trim: true,
       },
-      canonicalUrl: {
-        type: String,
-        default: "",
-        trim: true,
-      },
-      metaRobots: {
-        type: String,
-        default: "index, follow",
-        trim: true,
-      },
     },
     socialShare: {
       ogTitle: {

@@ -130,12 +130,6 @@ const normalizeSeoFields = (seo = {}) => ({
   titleTag: typeof seo.titleTag === "string" ? seo.titleTag.trim() : "",
   metaDescription:
     typeof seo.metaDescription === "string" ? seo.metaDescription.trim() : "",
-  canonicalUrl:
-    typeof seo.canonicalUrl === "string" ? seo.canonicalUrl.trim() : "",
-  metaRobots:
-    typeof seo.metaRobots === "string" && seo.metaRobots.trim()
-      ? seo.metaRobots.trim()
-      : "index, follow",
 });
 
 const normalizeSocialShareFields = (socialShare = {}) => ({
@@ -168,8 +162,6 @@ const getProductSeoFromBody = (body = {}) =>
   normalizeSeoFields({
     titleTag: body.seoTitle ?? body.titleTag,
     metaDescription: body.seoDescription ?? body.metaDescription,
-    canonicalUrl: body.seoCanonicalUrl ?? body.canonicalUrl,
-    metaRobots: body.seoRobots ?? body.metaRobots,
   });
 
 const getProductSocialShareFromBody = (body = {}) =>
@@ -658,14 +650,6 @@ const updateProduct = async (req, res) => {
         req.body.seoDescription !== undefined
           ? req.body.seoDescription
           : product.seo?.metaDescription,
-      seoCanonicalUrl:
-        req.body.seoCanonicalUrl !== undefined
-          ? req.body.seoCanonicalUrl
-          : product.seo?.canonicalUrl,
-      seoRobots:
-        req.body.seoRobots !== undefined
-          ? req.body.seoRobots
-          : product.seo?.metaRobots,
     });
     product.socialShare = getProductSocialShareFromBody({
       ...product.socialShare?.toObject?.(),
