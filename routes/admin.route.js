@@ -49,6 +49,7 @@ const {
   updateOrderStatus,
 } = require("../controllers/order.controller");
 const { updateMostBuyStatus } = require("../controllers/product.controller");
+const { getReferralStats } = require("../controllers/referral.controller");
 const upload = require("../config/multerConfig");
 const { isAdminAuth } = require("../middlewares/auth.middleware");
 
@@ -80,6 +81,7 @@ adminRouter.patch("/orders/:orderId/next-phase", isAdminAuth, advanceOrderPhase)
 adminRouter.patch("/orders/:orderId/status", isAdminAuth, updateOrderStatus);
 adminRouter.delete("/orders/:orderId", isAdminAuth, deleteAdminManualOrder);
 adminRouter.patch("/products/:id/most-buy", isAdminAuth, updateMostBuyStatus);
+adminRouter.get("/referrals/stats", isAdminAuth, getReferralStats);
 adminRouter.get("/public-settings", getPublicSettings);
 adminRouter.get("/settings", isAdminAuth, getSettings);
 adminRouter.put(

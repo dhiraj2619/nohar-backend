@@ -29,6 +29,7 @@ const orderRouter = require("./routes/order.route");
 const { broadcastRouter, publicBroadcastRouter } = require("./routes/broadcast.route");
 const { locationRouter } = require("./routes/location.route");
 const { leadRouter } = require("./routes/lead.route");
+const { referralRouter } = require("./routes/referral.route");
 const { initializeFirebase } = require("./services/notification.service");
 const { markStaleCartsAbandoned } = require("./services/lead.service");
 const {
@@ -82,6 +83,7 @@ app.use("/api/v1/wallet", walletRouter);
 app.use("/api/v1/orders", orderRouter);
 app.use("/api/v1/locations", locationRouter);
 app.use("/api/v1/leads", leadRouter);
+app.use("/api/v1/referrals", referralRouter);
 app.use("/api/v1/app", appRouter);
 
 // admin routes
