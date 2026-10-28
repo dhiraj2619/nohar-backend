@@ -260,10 +260,12 @@ const resolveOtpSourceContext = (req) => {
       "",
   ).trim();
   const userAgent = String(req.headers?.["user-agent"] || "").trim().slice(0, 255) || null;
+  const cloudflareIp = String(req.headers?.["cf-connecting-ip"] || "").trim();
   const forwardedFor = String(req.headers?.["x-forwarded-for"] || "").split(",")[0].trim();
   const ipAddress =
     normalizeRequestIp(
-      forwardedFor ||
+      cloudflareIp ||
+        forwardedFor ||
         req.ip ||
         req.socket?.remoteAddress ||
         req.connection?.remoteAddress ||
@@ -466,6 +468,144 @@ const resetOtpWindow = (otpSession, now = new Date()) => {
   otpSession.otp = null;
   otpSession.otpExpiry = new Date(now.getTime() + OTP_WINDOW_MS);
   otpSession.providerRequestId = null;
+};
+
+const OTP_RESEND_COOLDOWN_MS = 60 * 1000;
+const OTP_PHONE_DAILY_SMS_LIMIT = 10;
+const OTP_IP_HOURLY_SMS_LIMIT = 15;
+const OTP_IP_HOURLY_PHONE_LIMIT = 5;
+const OTP_IP_HOURLY_REQUEST_LIMIT = 60;
+const OTP_DELIVERED_STATUSES = ["sent", "resent"];
+const ONE_HOUR_MS = 60 * 60 * 1000;
+const ONE_DAY_MS = 24 * ONE_HOUR_MS;
+
+const getOtpRateLimitViolation = async ({ phone, sourceIpAddress, now }) => {
+  const dayAgo = new Date(now.getTime() - ONE_DAY_MS);
+  const hourAgo = new Date(now.getTime() - ONE_HOUR_MS);
+
+  const phoneSmsCount = await OtpAction.countDocuments({
+    phone,
+    actionType: { $in: ["send", "resend"] },
+    deliveryStatus: { $in: OTP_DELIVERED_STATUSES },
+    createdAt: { $gte: dayAgo },
+  });
+
+  if (phoneSmsCount >= OTP_PHONE_DAILY_SMS_LIMIT) {
+    return {
+      reason: "phone_daily_limit",
+      message: "OTP limit reached for this number. Please try again tomorrow.",
+      retryAfterSeconds: ONE_DAY_MS / 1000,
+    };
+  }
+
+  if (!sourceIpAddress) {
+    return null;
+  }
+
+  const ipFilter = {
+    sourceIpAddress,
+    actionType: { $in: ["send", "resend"] },
+    createdAt: { $gte: hourAgo },
+  };
+
+  const [ipRequestCount, ipSmsCount, ipPhones] = await Promise.all([
+    OtpAction.countDocuments(ipFilter),
+    OtpAction.countDocuments({ ...ipFilter, deliveryStatus: { $in: OTP_DELIVERED_STATUSES } }),
+    OtpAction.distinct("phone", { ...ipFilter, deliveryStatus: { $in: OTP_DELIVERED_STATUSES } }),
+  ]);
+
+  if (
+    ipRequestCount >= OTP_IP_HOURLY_REQUEST_LIMIT ||
+    ipSmsCount >= OTP_IP_HOURLY_SMS_LIMIT ||
+    (ipPhones.length >= OTP_IP_HOURLY_PHONE_LIMIT && !ipPhones.includes(phone))
+  ) {
+    return {
+      reason: "ip_hourly_limit",
+      message: "Too many OTP requests. Please try again later.",
+      retryAfterSeconds: ONE_HOUR_MS / 1000,
+    };
+  }
+
+  return null;
+};
+
+// Atomically reserves the next send for this phone so parallel requests
+// cannot both pass the cooldown and trigger duplicate SMS.
+const claimOtpSendSlot = async (phone, now) => {
+  const cooldownCutoff = new Date(now.getTime() - OTP_RESEND_COOLDOWN_MS);
+  const claimed = await Otp.findOneAndUpdate(
+    {
+      phone,
+      $or: [{ lastSentAt: null }, { lastSentAt: { $lte: cooldownCutoff } }],
+    },
+    { $set: { lastSentAt: now } },
+  );
+
+  if (claimed) {
+    return { allowed: true };
+  }
+
+  const existing = await Otp.findOne({ phone }).select("lastSentAt").lean();
+
+  if (!existing) {
+    return { allowed: true };
+  }
+
+  const elapsedMs = now.getTime() - new Date(existing.lastSentAt).getTime();
+  const retryAfterSeconds = Math.max(1, Math.ceil((OTP_RESEND_COOLDOWN_MS - elapsedMs) / 1000));
+
+  return {
+    allowed: false,
+    reason: "cooldown",
+    message: `Please wait ${retryAfterSeconds} seconds before requesting a new OTP`,
+    retryAfterSeconds,
+  };
+};
+
+// Returns true when the request was rejected and a response has been sent.
+const rejectIfOtpRateLimited = async ({ res, actionType, phone, sourceContext, traceId, now }) => {
+  let violation = await getOtpRateLimitViolation({
+    phone,
+    sourceIpAddress: sourceContext.sourceIpAddress,
+    now,
+  });
+
+  if (!violation) {
+    const slot = await claimOtpSendSlot(phone, now);
+    violation = slot.allowed ? null : slot;
+  }
+
+  if (!violation) {
+    return false;
+  }
+
+  logOtpEvent(`${actionType}:rate_limited`, {
+    traceId,
+    source: sourceContext.source,
+    phone: maskPhone(phone),
+    sourceIpAddress: sourceContext.sourceIpAddress,
+    reason: violation.reason,
+  });
+
+  await recordOtpAction({
+    phone,
+    actionType,
+    sourceContext,
+    traceId,
+    deliveryStatus: "rate_limited",
+    status: "rate_limited",
+    failureReason: violation.message,
+    providerResponse: { rateLimited: true, reason: violation.reason },
+  });
+
+  res.set("Retry-After", String(violation.retryAfterSeconds));
+  res.status(429).json({
+    success: false,
+    message: violation.message,
+    retryAfterSeconds: violation.retryAfterSeconds,
+  });
+
+  return true;
 };
 
 const normalizeFast2SmsError = (error) => {
@@ -787,6 +927,19 @@ const sendOTP = async (req, res) => {
       });
     }
 
+    if (
+      await rejectIfOtpRateLimited({
+        res,
+        actionType: "send",
+        phone: cleanPhone,
+        sourceContext,
+        traceId,
+        now,
+      })
+    ) {
+      return;
+    }
+
     let otpSession = await Otp.findOne({ phone: cleanPhone });
 
     if (otpSession && (otpSession.status === "verified" || isOtpWindowExpired(otpSession))) {
@@ -1012,6 +1165,19 @@ const resendOTP = async (req, res) => {
         requiredVersionCode: blockDetails.requiredVersionCode,
         currentVersionCode: blockDetails.appVersionCode,
       });
+    }
+
+    if (
+      await rejectIfOtpRateLimited({
+        res,
+        actionType: "resend",
+        phone: cleanPhone,
+        sourceContext,
+        traceId,
+        now,
+      })
+    ) {
+      return;
     }
 
     const otpSession = await Otp.findOne({ phone: cleanPhone });
