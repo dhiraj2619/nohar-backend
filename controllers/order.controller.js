@@ -48,7 +48,7 @@ const DEFAULT_STORE_DETAILS = {
   partialPaymentType: "PERCENT",
   partialPaymentValue: 0,
   freeShippingAbove: 899,
-  ordersAcceptedAbove: 899,
+  ordersAcceptedAbove: 599,
   shippingCharges: 0,
   maintenanceMode: false,
 };

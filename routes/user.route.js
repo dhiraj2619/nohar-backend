@@ -12,7 +12,7 @@
   sendOrderEmailSms,
 } = require("../controllers/user.controller");
 const { getUserNotifications } = require("../controllers/notification.controller");
-const { isAuth } = require("../middlewares/auth.middleware");
+const { isAuth, optionalAuth } = require("../middlewares/auth.middleware");
 
 const userRouter = require("express").Router();
 
@@ -20,7 +20,7 @@ userRouter.post("/check-user", checkUser);
 userRouter.post("/send-otp", sendOTP);
 userRouter.post("/resend-otp", resendOTP);
 userRouter.post("/verify-otp", verifyOTP);
-userRouter.post("/register", registerUser);
+userRouter.post("/register", optionalAuth, registerUser);
 userRouter.post("/google-signin", googleSignIn);
 userRouter.post("/logout", logoutUser);
 userRouter.post("/complete-profile", isAuth, completeUserProfile);

@@ -47,6 +47,13 @@ const APP_FORCE_UPDATE = process.env.APP_FORCE_UPDATE || "true";
 const APP_PLAY_STORE_URL =
   process.env.APP_PLAY_STORE_URL ||
   "https://play.google.com/store/apps/details?id=com.nohar";
+const RECAPTCHA_PROJECT_ID = process.env.RECAPTCHA_PROJECT_ID;
+const RECAPTCHA_API_KEY = process.env.RECAPTCHA_API_KEY;
+const RECAPTCHA_ANDROID_SITE_KEY = process.env.RECAPTCHA_ANDROID_SITE_KEY;
+const RECAPTCHA_WEB_SITE_KEY = process.env.RECAPTCHA_WEB_SITE_KEY;
+const RECAPTCHA_MIN_SCORE = Number.parseFloat(process.env.RECAPTCHA_MIN_SCORE) || 0.5;
+// Keep "false" until most users run an app/website version that sends tokens.
+const RECAPTCHA_REQUIRED = process.env.RECAPTCHA_REQUIRED === "true";
 
 module.exports = {
   PORT,
@@ -84,4 +91,10 @@ module.exports = {
   APP_LATEST_VERSION_NAME,
   APP_FORCE_UPDATE,
   APP_PLAY_STORE_URL,
+  RECAPTCHA_PROJECT_ID,
+  RECAPTCHA_API_KEY,
+  RECAPTCHA_ANDROID_SITE_KEY,
+  RECAPTCHA_WEB_SITE_KEY,
+  RECAPTCHA_MIN_SCORE,
+  RECAPTCHA_REQUIRED,
 };

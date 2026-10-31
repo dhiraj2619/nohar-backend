@@ -21,6 +21,7 @@ const OtpAction = require("../models/otpAction.model");
 const OtpBlockedIp = require("../models/otpBlockedIp.model");
 const User = require("../models/users.model");
 const { creditSignupBonus, getPointBalance } = require("../services/rewards.service");
+const { verifySendOtpRecaptcha } = require("../services/recaptcha.service");
 
 const googleClient = new OAuth2Client();
 
@@ -470,7 +471,13 @@ const resetOtpWindow = (otpSession, now = new Date()) => {
   otpSession.providerRequestId = null;
 };
 
-const OTP_RESEND_COOLDOWN_MS = 60 * 1000;
+const OTP_RESEND_COOLDOWN_MS = 30 * 1000;
+// Each number can receive at most 3 OTPs in any rolling 90-minute window.
+const OTP_PHONE_WINDOW_MS = 90 * 60 * 1000;
+const OTP_PHONE_WINDOW_LIMIT = 3;
+const OTP_MAX_VERIFY_ATTEMPTS = 5;
+// An unauthenticated /register call must follow an OTP verified this recently.
+const OTP_SIGNUP_WINDOW_MS = 15 * 60 * 1000;
 const OTP_PHONE_DAILY_SMS_LIMIT = 10;
 const OTP_IP_HOURLY_SMS_LIMIT = 15;
 const OTP_IP_HOURLY_PHONE_LIMIT = 5;
@@ -478,6 +485,47 @@ const OTP_IP_HOURLY_REQUEST_LIMIT = 60;
 const OTP_DELIVERED_STATUSES = ["sent", "resent"];
 const ONE_HOUR_MS = 60 * 60 * 1000;
 const ONE_DAY_MS = 24 * ONE_HOUR_MS;
+
+const countPhoneOtpsInWindow = (phone, now) =>
+  OtpAction.countDocuments({
+    phone,
+    actionType: { $in: ["send", "resend"] },
+    deliveryStatus: { $in: OTP_DELIVERED_STATUSES },
+    createdAt: { $gte: new Date(now.getTime() - OTP_PHONE_WINDOW_MS) },
+  });
+
+const getOtpAttemptsLeft = async (phone, now = new Date()) =>
+  Math.max(0, OTP_PHONE_WINDOW_LIMIT - (await countPhoneOtpsInWindow(phone, now)));
+
+// The number unlocks when the oldest OTP in the current window is 90 minutes old.
+const getPhoneWindowViolation = async (phone, now) => {
+  const windowStart = new Date(now.getTime() - OTP_PHONE_WINDOW_MS);
+  const recentSends = await OtpAction.find({
+    phone,
+    actionType: { $in: ["send", "resend"] },
+    deliveryStatus: { $in: OTP_DELIVERED_STATUSES },
+    createdAt: { $gte: windowStart },
+  })
+    .sort({ createdAt: -1 })
+    .limit(OTP_PHONE_WINDOW_LIMIT)
+    .select("createdAt")
+    .lean();
+
+  if (recentSends.length < OTP_PHONE_WINDOW_LIMIT) {
+    return null;
+  }
+
+  const oldestInWindow = new Date(recentSends[recentSends.length - 1].createdAt);
+  const unlocksAt = oldestInWindow.getTime() + OTP_PHONE_WINDOW_MS;
+  const retryAfterSeconds = Math.max(1, Math.ceil((unlocksAt - now.getTime()) / 1000));
+
+  return {
+    reason: "phone_window_limit",
+    code: "OTP_LIMIT_REACHED",
+    message: `You have used all ${OTP_PHONE_WINDOW_LIMIT} OTPs. Please try again in ${Math.ceil(retryAfterSeconds / 60)} minutes.`,
+    retryAfterSeconds,
+  };
+};
 
 const getOtpRateLimitViolation = async ({ phone, sourceIpAddress, now }) => {
   const dayAgo = new Date(now.getTime() - ONE_DAY_MS);
@@ -493,9 +541,16 @@ const getOtpRateLimitViolation = async ({ phone, sourceIpAddress, now }) => {
   if (phoneSmsCount >= OTP_PHONE_DAILY_SMS_LIMIT) {
     return {
       reason: "phone_daily_limit",
+      code: "OTP_LIMIT_REACHED",
       message: "OTP limit reached for this number. Please try again tomorrow.",
       retryAfterSeconds: ONE_DAY_MS / 1000,
     };
+  }
+
+  const windowViolation = await getPhoneWindowViolation(phone, now);
+
+  if (windowViolation) {
+    return windowViolation;
   }
 
   if (!sourceIpAddress) {
@@ -521,6 +576,7 @@ const getOtpRateLimitViolation = async ({ phone, sourceIpAddress, now }) => {
   ) {
     return {
       reason: "ip_hourly_limit",
+      code: "TOO_MANY_REQUESTS",
       message: "Too many OTP requests. Please try again later.",
       retryAfterSeconds: ONE_HOUR_MS / 1000,
     };
@@ -557,6 +613,7 @@ const claimOtpSendSlot = async (phone, now) => {
   return {
     allowed: false,
     reason: "cooldown",
+    code: "RESEND_TOO_SOON",
     message: `Please wait ${retryAfterSeconds} seconds before requesting a new OTP`,
     retryAfterSeconds,
   };
@@ -601,8 +658,51 @@ const rejectIfOtpRateLimited = async ({ res, actionType, phone, sourceContext, t
   res.set("Retry-After", String(violation.retryAfterSeconds));
   res.status(429).json({
     success: false,
+    code: violation.code,
     message: violation.message,
     retryAfterSeconds: violation.retryAfterSeconds,
+    attemptsLeft:
+      violation.code === "OTP_LIMIT_REACHED" ? 0 : await getOtpAttemptsLeft(phone, now),
+  });
+
+  return true;
+};
+
+// Returns true when the request was rejected and a response has been sent.
+const rejectIfRecaptchaFailed = async ({ req, res, actionType, phone, sourceContext, traceId }) => {
+  const result = await verifySendOtpRecaptcha({
+    token: req.body?.recaptchaToken,
+    source: sourceContext.source,
+  });
+
+  logOtpEvent(`${actionType}:recaptcha`, {
+    traceId,
+    source: sourceContext.source,
+    phone: maskPhone(phone),
+    allowed: result.allowed,
+    reason: result.reason,
+    score: result.score,
+  });
+
+  if (result.allowed) {
+    return false;
+  }
+
+  await recordOtpAction({
+    phone,
+    actionType,
+    sourceContext,
+    traceId,
+    deliveryStatus: "blocked",
+    status: "blocked",
+    failureReason: `recaptcha_${result.reason}`,
+    providerResponse: { recaptcha: result },
+  });
+
+  res.status(403).json({
+    success: false,
+    code: "RECAPTCHA_FAILED",
+    message: "Unable to verify your request. Please try again.",
   });
 
   return true;
@@ -928,6 +1028,19 @@ const sendOTP = async (req, res) => {
     }
 
     if (
+      await rejectIfRecaptchaFailed({
+        req,
+        res,
+        actionType: "send",
+        phone: cleanPhone,
+        sourceContext,
+        traceId,
+      })
+    ) {
+      return;
+    }
+
+    if (
       await rejectIfOtpRateLimited({
         res,
         actionType: "send",
@@ -1004,6 +1117,7 @@ const sendOTP = async (req, res) => {
 
     if (providerSuccess) {
       otpSession.sendCount = (otpSession.sendCount || 0) + 1;
+      otpSession.verifyAttempts = 0;
     }
 
     await otpSession.save();
@@ -1044,6 +1158,8 @@ const sendOTP = async (req, res) => {
       message: "OTP sent successfully",
       requestId: providerRequestId,
       expiresAt: expiryTime,
+      attemptsLeft: await getOtpAttemptsLeft(cleanPhone, now),
+      resendAfterSeconds: OTP_RESEND_COOLDOWN_MS / 1000,
       vendorResponse: responseData,
     });
   } catch (error) {
@@ -1168,6 +1284,19 @@ const resendOTP = async (req, res) => {
     }
 
     if (
+      await rejectIfRecaptchaFailed({
+        req,
+        res,
+        actionType: "resend",
+        phone: cleanPhone,
+        sourceContext,
+        traceId,
+      })
+    ) {
+      return;
+    }
+
+    if (
       await rejectIfOtpRateLimited({
         res,
         actionType: "resend",
@@ -1253,6 +1382,7 @@ const resendOTP = async (req, res) => {
     if (providerSuccess) {
       otpSession.resendCount = (otpSession.resendCount || 0) + 1;
       otpSession.sendCount = (otpSession.sendCount || 0) + 1;
+      otpSession.verifyAttempts = 0;
       otpSession.status = "pending";
       otpSession.otpExpiry = expiryTime;
     }
@@ -1296,6 +1426,8 @@ const resendOTP = async (req, res) => {
       message: "OTP resent successfully",
       requestId: providerRequestId,
       expiresAt: otpSession.otpExpiry,
+      attemptsLeft: await getOtpAttemptsLeft(cleanPhone, now),
+      resendAfterSeconds: OTP_RESEND_COOLDOWN_MS / 1000,
       vendorResponse: responseData,
     });
   } catch (error) {
@@ -1465,6 +1597,26 @@ const verifyOTP = async (req, res) => {
       });
     }
 
+    if (otpSession.verifyAttempts > OTP_MAX_VERIFY_ATTEMPTS) {
+      otpSession.status = "expired";
+      otpSession.failureReason = "too_many_verify_attempts";
+      await otpSession.save();
+
+      logOtpEvent("verify:attempts_exceeded", {
+        traceId,
+        source,
+        phone: maskPhone(cleanPhone),
+        verifyAttempts: otpSession.verifyAttempts,
+      });
+
+      return res.status(400).json({
+        success: false,
+        code: "OTP_ATTEMPTS_EXCEEDED",
+        message: "Too many wrong attempts. Please request a new OTP.",
+        attemptsLeft: 0,
+      });
+    }
+
     const response = await callFast2SmsOtpVerify(cleanPhone, cleanOtp);
     const responseData = response?.data || {};
     const providerStatusCode = getFast2SmsStatusCode(responseData, response?.status);
@@ -1500,9 +1652,13 @@ const verifyOTP = async (req, res) => {
         response: responseData,
       });
 
-      return res.status(providerStatusCode && providerStatusCode >= 400 ? providerStatusCode : 400).json({
+      // Always 400 (never the provider's 401/403) so clients don't treat a
+      // wrong OTP as an expired login session.
+      return res.status(400).json({
         success: false,
+        code: "OTP_INVALID",
         message: otpSession.failureReason || "Invalid OTP",
+        attemptsLeft: Math.max(0, OTP_MAX_VERIFY_ATTEMPTS - otpSession.verifyAttempts),
         vendorResponse: responseData,
       });
     }
@@ -1563,6 +1719,7 @@ const verifyOTP = async (req, res) => {
       success: true,
       message: "OTP verified successfully",
       user: buildUserAuthResponse(user),
+      isNewUser: !user.profileCompleted,
       token,
     });
   } catch (error) {
@@ -1755,10 +1912,21 @@ const completeUserProfile = async (req, res) => {
       });
     }
 
-    if (targetPhone && !userId) {
-      const otpSession = await Otp.findOne({ phone: targetPhone });
+    // Without a login token, only allow sign-up right after this number's OTP
+    // was verified, so nobody can claim a number verified earlier.
+    let signupOtpSession = null;
 
-      if (!otpSession || otpSession.status !== "verified") {
+    if (targetPhone && !userId) {
+      signupOtpSession = await Otp.findOne({ phone: targetPhone });
+      const verifiedAt = signupOtpSession?.verifiedAt
+        ? new Date(signupOtpSession.verifiedAt).getTime()
+        : 0;
+
+      if (
+        !signupOtpSession ||
+        signupOtpSession.status !== "verified" ||
+        Date.now() - verifiedAt > OTP_SIGNUP_WINDOW_MS
+      ) {
         return res.status(400).json({
           success: false,
           message: "Please verify your mobile number first",
@@ -1770,6 +1938,13 @@ const completeUserProfile = async (req, res) => {
 
     if (!user && targetPhone) {
       user = await User.findOne({ phone: targetPhone });
+    }
+
+    if (!userId && user?.profileCompleted) {
+      return res.status(409).json({
+        success: false,
+        message: "An account already exists for this number. Please log in.",
+      });
     }
 
     if (!user && targetPhone) {
@@ -1801,6 +1976,12 @@ const completeUserProfile = async (req, res) => {
     }
 
     await user.save();
+
+    if (signupOtpSession) {
+      signupOtpSession.status = "expired";
+      signupOtpSession.failureReason = "consumed_by_register";
+      await signupOtpSession.save();
+    }
 
     if (!user.signupBonusGranted) {
       try {

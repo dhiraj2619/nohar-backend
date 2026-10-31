@@ -124,4 +124,16 @@ const isAdminAuth = async (req, res, next) => {
   }
 };
 
-module.exports = { isAuth, isAdminAuth };
+// Authenticates the request when a Bearer token is sent, otherwise continues
+// as a guest. An invalid or expired token is still rejected with 401.
+const optionalAuth = (req, res, next) => {
+  const hasBearerToken = String(req.headers.authorization || "").startsWith("Bearer ");
+
+  if (!hasBearerToken) {
+    return next();
+  }
+
+  return isAuth(req, res, next);
+};
+
+module.exports = { isAuth, isAdminAuth, optionalAuth };

@@ -70,7 +70,7 @@ const adminInfoSchema = new mongoose.Schema(
     },
     ordersAcceptedAbove: {
       type: Number,
-      default: 899,
+      default: 599,
       min: 0,
     },
     shippingCharges: {
