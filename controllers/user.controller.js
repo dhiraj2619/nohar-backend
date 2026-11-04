@@ -1091,6 +1091,17 @@ const sendOTP = async (req, res) => {
         sendCount: otpSession.sendCount || 0,
       });
 
+      await recordOtpAction({
+        phone: cleanPhone,
+        actionType: "send",
+        sourceContext,
+        traceId,
+        deliveryStatus: "rate_limited",
+        status: "rate_limited",
+        failureReason: "OTP limit reached",
+        providerResponse: { rateLimited: true, reason: "session_send_limit" },
+      });
+
       return res.status(429).json({
         success: false,
         message: "OTP limit reached. Please try again later.",
@@ -1313,6 +1324,17 @@ const resendOTP = async (req, res) => {
 
     if (!otpSession) {
       logOtpEvent("resend:no_session", { traceId, source, phone: maskPhone(cleanPhone) });
+
+      await recordOtpAction({
+        phone: cleanPhone,
+        actionType: "resend",
+        sourceContext,
+        traceId,
+        deliveryStatus: "failed",
+        status: "failed",
+        failureReason: "No OTP request found for this number",
+      });
+
       return res.status(404).json({
         success: false,
         message: "No OTP request found for this number",
@@ -1357,6 +1379,17 @@ const resendOTP = async (req, res) => {
         source,
         phone: maskPhone(req.body?.phone || req.body?.mobile),
         sendCount: otpSession.sendCount || 0,
+      });
+
+      await recordOtpAction({
+        phone: cleanPhone,
+        actionType: "resend",
+        sourceContext,
+        traceId,
+        deliveryStatus: "rate_limited",
+        status: "rate_limited",
+        failureReason: "OTP limit reached",
+        providerResponse: { rateLimited: true, reason: "session_send_limit" },
       });
 
       return res.status(429).json({

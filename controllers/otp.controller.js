@@ -157,6 +157,7 @@ const formatDateTimeInIst = (value) =>
     year: "numeric",
     hour: "2-digit",
     minute: "2-digit",
+    second: "2-digit",
   });
 
 const buildOtpActionsCsv = (actions = []) => {
@@ -550,16 +551,26 @@ const applyBlockedIpExclusion = (filter = {}, blockedIps = []) => {
 
 const getOtpActions = async (req, res) => {
   try {
-    const page = getPositiveInt(req.query.page, 1, 1000);
+    const page = getPositiveInt(req.query.page, 1, Number.MAX_SAFE_INTEGER);
     const limit = getPositiveInt(req.query.limit, 25, 100);
     const skip = (page - 1) * limit;
     const blockedIps = await getActiveBlockedIpAddresses();
-    const filter = applyBlockedIpExclusion(buildOtpActionQuery(req.query), blockedIps);
+    const baseFilter = buildOtpActionQuery(req.query);
+    // Blocked IPs are hidden from the default view, but a search must still find them.
+    const hideBlockedIps = !String(req.query.search || req.query.phone || "").trim();
+    const filter = hideBlockedIps
+      ? applyBlockedIpExclusion(baseFilter, blockedIps)
+      : baseFilter;
 
-    const [actions, totalCount, sourceSummary, actionSummary] = await Promise.all([
+    const [actions, totalCount, totalTracked, hiddenBlockedIpCount, sourceSummary, actionSummary] = await Promise.all([
       OtpAction.find(filter).sort({ createdAt: -1 }).skip(skip).limit(limit).lean(),
       OtpAction.countDocuments(filter),
+      OtpAction.estimatedDocumentCount(),
+      hideBlockedIps && blockedIps.length > 0
+        ? OtpAction.countDocuments({ ...baseFilter, sourceIpAddress: { $in: blockedIps } })
+        : 0,
       OtpAction.aggregate([
+        { $match: filter },
         {
           $group: {
             _id: "$source",
@@ -568,6 +579,7 @@ const getOtpActions = async (req, res) => {
         },
       ]),
       OtpAction.aggregate([
+        { $match: filter },
         {
           $group: {
             _id: "$actionType",
@@ -612,6 +624,8 @@ const getOtpActions = async (req, res) => {
         totalPages: Math.max(1, Math.ceil(totalCount / limit)),
       },
       summary: {
+        totalTracked,
+        hiddenBlockedIpCount,
         sourceCounts,
         actionCounts,
       },
