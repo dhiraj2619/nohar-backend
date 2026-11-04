@@ -619,23 +619,7 @@ const claimOtpSendSlot = async (phone, now) => {
   };
 };
 
-// Returns true when the request was rejected and a response has been sent.
-const rejectIfOtpRateLimited = async ({ res, actionType, phone, sourceContext, traceId, now }) => {
-  let violation = await getOtpRateLimitViolation({
-    phone,
-    sourceIpAddress: sourceContext.sourceIpAddress,
-    now,
-  });
-
-  if (!violation) {
-    const slot = await claimOtpSendSlot(phone, now);
-    violation = slot.allowed ? null : slot;
-  }
-
-  if (!violation) {
-    return false;
-  }
-
+const sendOtpRateLimitResponse = async ({ res, actionType, phone, sourceContext, traceId, now, violation }) => {
   logOtpEvent(`${actionType}:rate_limited`, {
     traceId,
     source: sourceContext.source,
@@ -664,6 +648,37 @@ const rejectIfOtpRateLimited = async ({ res, actionType, phone, sourceContext, t
     attemptsLeft:
       violation.code === "OTP_LIMIT_REACHED" ? 0 : await getOtpAttemptsLeft(phone, now),
   });
+};
+
+// Read-only, so it can run before the billable reCAPTCHA call without using up
+// the number's cooldown. Returns true when a response has been sent.
+const rejectIfOtpRateLimited = async ({ res, actionType, phone, sourceContext, traceId, now }) => {
+  const violation = await getOtpRateLimitViolation({
+    phone,
+    sourceIpAddress: sourceContext.sourceIpAddress,
+    now,
+  });
+
+  if (!violation) {
+    return false;
+  }
+
+  await sendOtpRateLimitResponse({ res, actionType, phone, sourceContext, traceId, now, violation });
+
+  return true;
+};
+
+// Reserves the cooldown slot, so it must only run after reCAPTCHA has passed.
+// Otherwise a bot could trigger the cooldown on a real user's number.
+// Returns true when a response has been sent.
+const rejectIfOtpSlotTaken = async ({ res, actionType, phone, sourceContext, traceId, now }) => {
+  const slot = await claimOtpSendSlot(phone, now);
+
+  if (slot.allowed) {
+    return false;
+  }
+
+  await sendOtpRateLimitResponse({ res, actionType, phone, sourceContext, traceId, now, violation: slot });
 
   return true;
 };
@@ -1028,6 +1043,19 @@ const sendOTP = async (req, res) => {
     }
 
     if (
+      await rejectIfOtpRateLimited({
+        res,
+        actionType: "send",
+        phone: cleanPhone,
+        sourceContext,
+        traceId,
+        now,
+      })
+    ) {
+      return;
+    }
+
+    if (
       await rejectIfRecaptchaFailed({
         req,
         res,
@@ -1041,7 +1069,7 @@ const sendOTP = async (req, res) => {
     }
 
     if (
-      await rejectIfOtpRateLimited({
+      await rejectIfOtpSlotTaken({
         res,
         actionType: "send",
         phone: cleanPhone,
@@ -1295,6 +1323,19 @@ const resendOTP = async (req, res) => {
     }
 
     if (
+      await rejectIfOtpRateLimited({
+        res,
+        actionType: "resend",
+        phone: cleanPhone,
+        sourceContext,
+        traceId,
+        now,
+      })
+    ) {
+      return;
+    }
+
+    if (
       await rejectIfRecaptchaFailed({
         req,
         res,
@@ -1308,7 +1349,7 @@ const resendOTP = async (req, res) => {
     }
 
     if (
-      await rejectIfOtpRateLimited({
+      await rejectIfOtpSlotTaken({
         res,
         actionType: "resend",
         phone: cleanPhone,

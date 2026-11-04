@@ -24,6 +24,7 @@ const load = ({
   otpAction = {},
   providerCalls = [],
   recaptcha = { allowed: true, reason: "passed" },
+  recaptchaCalls = [],
   providerResponse = { status: 200, data: { return: true, request_id: "r1" } },
 }) => {
   const modules = {
@@ -36,7 +37,7 @@ const load = ({
     "../models/otpBlockedIp.model": { findOne: () => query(null) },
     "../models/users.model": {},
     "../services/rewards.service": {},
-    "../services/recaptcha.service": { verifySendOtpRecaptcha: async () => recaptcha },
+    "../services/recaptcha.service": { verifySendOtpRecaptcha: async (args) => { recaptchaCalls.push(args); return recaptcha; } },
   };
   const context = { module: { exports: {} }, require: (name) => modules[name], console: { ...console, info: () => {} }, Date, Promise };
   vm.runInNewContext(fs.readFileSync(require.resolve("../controllers/user.controller"), "utf8"), context);
@@ -176,6 +177,48 @@ test("send-otp is rejected without calling the provider when reCAPTCHA fails", a
   assert.equal(res.code, 403);
   assert.equal(res.body.code, "RECAPTCHA_FAILED");
   assert.equal(providerCalls.length, 0);
+});
+
+test("send-otp does not call reCAPTCHA once an IP has hit its hourly request limit", async () => {
+  const recaptchaCalls = [];
+  const controller = load({
+    recaptchaCalls,
+    otpAction: { countDocuments: async (filter) => (filter.sourceIpAddress ? 60 : 0) },
+  });
+
+  const res = response();
+  await controller.sendOTP(request(), res);
+
+  assert.equal(res.code, 429);
+  assert.equal(recaptchaCalls.length, 0);
+});
+
+test("resend-otp does not call reCAPTCHA once an IP has hit its hourly request limit", async () => {
+  const recaptchaCalls = [];
+  const controller = load({
+    recaptchaCalls,
+    otpAction: { countDocuments: async (filter) => (filter.sourceIpAddress ? 60 : 0) },
+  });
+
+  const res = response();
+  await controller.resendOTP(request(), res);
+
+  assert.equal(res.code, 429);
+  assert.equal(recaptchaCalls.length, 0);
+});
+
+test("a failed reCAPTCHA does not use up the number's cooldown slot", async () => {
+  const slotClaims = [];
+  const controller = load({
+    recaptcha: { allowed: false, reason: "invalid_token_MALFORMED" },
+    otp: { findOneAndUpdate: async (filter) => { slotClaims.push(filter); return null; } },
+  });
+
+  const res = response();
+  await controller.sendOTP(request(), res);
+
+  assert.equal(res.code, 403);
+  assert.equal(slotClaims.length, 0);
 });
 
 test("send-otp success reports how many OTPs are left in the window", async () => {

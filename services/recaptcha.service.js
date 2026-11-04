@@ -9,6 +9,9 @@ const {
 } = require("../config/config");
 
 const SEND_OTP_ACTION = "send_otp";
+// Real tokens run far longer than this. Anything shorter is junk, and rejecting
+// it here avoids a billable assessment.
+const MIN_TOKEN_LENGTH = 100;
 
 const isRecaptchaConfigured = () =>
   Boolean(RECAPTCHA_PROJECT_ID && RECAPTCHA_API_KEY);
@@ -31,6 +34,10 @@ const verifySendOtpRecaptcha = async ({ token, source }) => {
     return RECAPTCHA_REQUIRED
       ? { allowed: false, reason: token ? "site_key_missing" : "token_missing" }
       : { allowed: true, reason: token ? "site_key_missing" : "token_missing" };
+  }
+
+  if (typeof token !== "string" || token.length < MIN_TOKEN_LENGTH) {
+    return { allowed: false, reason: "invalid_token_MALFORMED" };
   }
 
   try {
