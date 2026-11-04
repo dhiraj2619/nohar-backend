@@ -68,6 +68,38 @@ test("a search also finds rows from blocked IPs", async () => {
   assert.equal(res.body.summary.hiddenBlockedIpCount, 0);
 });
 
+test("the reCAPTCHA tab only returns reCAPTCHA failures and breaks them down by reason", async () => {
+  const { res, calls } = await run({ query: { category: "recaptcha" }, blockedIps: ["1.1.1.1"] });
+
+  assert.equal(calls.findFilter.failureReason.$regex, "^recaptcha_");
+  assert.deepEqual(JSON.parse(JSON.stringify(calls.findFilter.sourceIpAddress)), { $nin: ["1.1.1.1"] });
+  assert.equal(calls.pipelines[2][1].$group._id, "$failureReason");
+  assert.equal(res.body.filters.category, "recaptcha");
+});
+
+test("the app update tab only returns app update blocks and breaks them down by build", async () => {
+  const { calls } = await run({ query: { category: "app_update" } });
+
+  assert.equal(calls.findFilter.failureReason.$regex, "^App update required");
+  assert.equal(calls.pipelines[2][1].$group._id, "$appVersionCode");
+});
+
+test("hidden blocked IP count on a tab only counts that tab's rows", async () => {
+  const { calls } = await run({ query: { category: "recaptcha" }, blockedIps: ["1.1.1.1"] });
+  const hiddenCount = calls.counts.find((filter) => filter.sourceIpAddress?.$in);
+
+  assert.equal(hiddenCount.failureReason.$regex, "^recaptcha_");
+});
+
+test("the all tab has no category filter but still reports both tab counts", async () => {
+  const { res, calls } = await run({ query: { category: "nonsense" } });
+
+  assert.equal(calls.findFilter.failureReason, undefined);
+  assert.equal(calls.pipelines.length, 2);
+  assert.equal(res.body.filters.category, "all");
+  assert.deepEqual(res.body.summary.categoryCounts, { recaptcha: 40, app_update: 40 });
+});
+
 test("pages past 1000 are not silently capped", async () => {
   const { res, calls } = await run({ query: { page: "1500", limit: "20" } });
 

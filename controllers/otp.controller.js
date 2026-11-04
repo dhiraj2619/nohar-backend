@@ -479,6 +479,20 @@ const normalizeActionFilter = (value) => {
   return null;
 };
 
+// Prefix matches on failureReason, so both tabs can use its index.
+const OTP_ACTION_CATEGORIES = {
+  recaptcha: { $regex: "^recaptcha_" },
+  app_update: { $regex: "^App update required" },
+};
+
+const normalizeCategoryFilter = (value) => {
+  const normalized = String(value || "").trim().toLowerCase();
+
+  return Object.prototype.hasOwnProperty.call(OTP_ACTION_CATEGORIES, normalized)
+    ? normalized
+    : null;
+};
+
 const getPositiveInt = (value, fallback, max = 100) => {
   const parsed = Number.parseInt(value, 10);
 
@@ -558,16 +572,34 @@ const getOtpActions = async (req, res) => {
     const baseFilter = buildOtpActionQuery(req.query);
     // Blocked IPs are hidden from the default view, but a search must still find them.
     const hideBlockedIps = !String(req.query.search || req.query.phone || "").trim();
-    const filter = hideBlockedIps
+    const visibleFilter = hideBlockedIps
       ? applyBlockedIpExclusion(baseFilter, blockedIps)
       : baseFilter;
 
-    const [actions, totalCount, totalTracked, hiddenBlockedIpCount, sourceSummary, actionSummary] = await Promise.all([
+    const category = normalizeCategoryFilter(req.query.category);
+    const filter = category
+      ? { ...visibleFilter, failureReason: OTP_ACTION_CATEGORIES[category] }
+      : visibleFilter;
+    const hiddenFilter = category
+      ? { ...baseFilter, failureReason: OTP_ACTION_CATEGORIES[category] }
+      : baseFilter;
+
+    const [
+      actions,
+      totalCount,
+      totalTracked,
+      hiddenBlockedIpCount,
+      sourceSummary,
+      actionSummary,
+      recaptchaCount,
+      appUpdateCount,
+      breakdown,
+    ] = await Promise.all([
       OtpAction.find(filter).sort({ createdAt: -1 }).skip(skip).limit(limit).lean(),
       OtpAction.countDocuments(filter),
       OtpAction.estimatedDocumentCount(),
       hideBlockedIps && blockedIps.length > 0
-        ? OtpAction.countDocuments({ ...baseFilter, sourceIpAddress: { $in: blockedIps } })
+        ? OtpAction.countDocuments({ ...hiddenFilter, sourceIpAddress: { $in: blockedIps } })
         : 0,
       OtpAction.aggregate([
         { $match: filter },
@@ -587,6 +619,22 @@ const getOtpActions = async (req, res) => {
           },
         },
       ]),
+      OtpAction.countDocuments({ ...visibleFilter, failureReason: OTP_ACTION_CATEGORIES.recaptcha }),
+      OtpAction.countDocuments({ ...visibleFilter, failureReason: OTP_ACTION_CATEGORIES.app_update }),
+      // Top reasons on the reCAPTCHA tab, top app builds on the app update tab.
+      category
+        ? OtpAction.aggregate([
+            { $match: filter },
+            {
+              $group: {
+                _id: category === "recaptcha" ? "$failureReason" : "$appVersionCode",
+                count: { $sum: 1 },
+              },
+            },
+            { $sort: { count: -1 } },
+            { $limit: 3 },
+          ])
+        : [],
     ]);
 
     const sourceCounts = {
@@ -628,8 +676,14 @@ const getOtpActions = async (req, res) => {
         hiddenBlockedIpCount,
         sourceCounts,
         actionCounts,
+        categoryCounts: {
+          recaptcha: recaptchaCount,
+          app_update: appUpdateCount,
+        },
+        breakdown: breakdown.map((item) => ({ key: item._id ?? null, count: item.count || 0 })),
       },
       filters: {
+        category: category || "all",
         search: String(req.query.search || req.query.phone || "").trim(),
         source: normalizeSourceFilter(req.query.source) || "all",
         actionType: normalizeActionFilter(req.query.actionType || req.query.action) || "all",
