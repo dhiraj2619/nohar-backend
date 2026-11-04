@@ -7,6 +7,7 @@ const {
   RECAPTCHA_MIN_SCORE,
   RECAPTCHA_REQUIRED,
 } = require("../config/config");
+const RecaptchaCheck = require("../models/recaptchaCheck.model");
 
 const SEND_OTP_ACTION = "send_otp";
 // Real tokens run far longer than this. Anything shorter is junk, and rejecting
@@ -23,7 +24,7 @@ const getSiteKeyForSource = (source) =>
 // Missing tokens are allowed unless RECAPTCHA_REQUIRED=true, so older app and
 // website versions keep working during rollout. If Google cannot be reached we
 // fail open (and log) rather than block every login.
-const verifySendOtpRecaptcha = async ({ token, source }) => {
+const assessSendOtpToken = async ({ token, source }) => {
   if (!isRecaptchaConfigured()) {
     return { allowed: true, reason: "not_configured" };
   }
@@ -77,6 +78,27 @@ const verifySendOtpRecaptcha = async ({ token, source }) => {
     console.error("reCAPTCHA assessment failed:", error?.response?.data || error.message);
     return { allowed: true, reason: "assessment_error" };
   }
+};
+
+const recordRecaptchaCheck = async (result) => {
+  try {
+    await RecaptchaCheck.create({
+      reason: result.reason,
+      allowed: result.allowed,
+      // Only a response from Google carries a score.
+      assessed: result.score !== undefined,
+    });
+  } catch (error) {
+    console.error("reCAPTCHA check record failed:", error.message);
+  }
+};
+
+const verifySendOtpRecaptcha = async ({ token, source }) => {
+  const result = await assessSendOtpToken({ token, source });
+
+  await recordRecaptchaCheck(result);
+
+  return result;
 };
 
 module.exports = {

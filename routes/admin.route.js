@@ -11,6 +11,7 @@ const {
 const {
   getOtpActions,
   getOtpActionsReport,
+  getRecaptchaStats,
   getBlockedOtpIps,
   blockOtpIp,
   updateBlockedOtpIp,
@@ -63,6 +64,7 @@ adminRouter.post("/customers/:customerId/manual-reward", isAdminAuth, promoteMan
 adminRouter.patch("/customers/:customerId/reward-balance", isAdminAuth, updateCustomerRewardBalance);
 adminRouter.get("/otp-actions", isAdminAuth, getOtpActions);
 adminRouter.get("/otp-actions/report", isAdminAuth, getOtpActionsReport);
+adminRouter.get("/otp-actions/recaptcha-stats", isAdminAuth, getRecaptchaStats);
 adminRouter.delete("/otp-actions/wipe-all", isAdminAuth, wipeAllOtpActions);
 adminRouter.delete("/otp-actions/wipe-range", isAdminAuth, wipeOtpActionsByDateRange);
 adminRouter.delete("/otp-actions/wipe-today", isAdminAuth, wipeTodayOtpActions);

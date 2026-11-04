@@ -87,6 +87,7 @@ otpActionSchema.index({ createdAt: -1 });
 otpActionSchema.index({ phone: 1, createdAt: -1 });
 otpActionSchema.index({ sourceIpAddress: 1, createdAt: -1 });
 otpActionSchema.index({ failureReason: 1, createdAt: -1 });
+otpActionSchema.index({ deliveryStatus: 1, createdAt: -1 });
 
 const OtpAction = mongoose.model("OtpAction", otpActionSchema);
 

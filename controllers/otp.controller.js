@@ -1,5 +1,6 @@
 const OtpAction = require("../models/otpAction.model");
 const OtpBlockedIp = require("../models/otpBlockedIp.model");
+const RecaptchaCheck = require("../models/recaptchaCheck.model");
 
 const escapeRegex = (value) =>
   String(value || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -479,10 +480,17 @@ const normalizeActionFilter = (value) => {
   return null;
 };
 
-// Prefix matches on failureReason, so both tabs can use its index.
+// Prefix matches on failureReason, so these tabs can use its index.
 const OTP_ACTION_CATEGORIES = {
-  recaptcha: { $regex: "^recaptcha_" },
-  app_update: { $regex: "^App update required" },
+  recaptcha: { failureReason: { $regex: "^recaptcha_" } },
+  app_update: { failureReason: { $regex: "^App update required" } },
+  rate_limit: { deliveryStatus: "rate_limited" },
+};
+
+const OTP_ACTION_BREAKDOWN_FIELDS = {
+  recaptcha: "$failureReason",
+  app_update: "$appVersionCode",
+  rate_limit: "$providerResponse.reason",
 };
 
 const normalizeCategoryFilter = (value) => {
@@ -578,10 +586,10 @@ const getOtpActions = async (req, res) => {
 
     const category = normalizeCategoryFilter(req.query.category);
     const filter = category
-      ? { ...visibleFilter, failureReason: OTP_ACTION_CATEGORIES[category] }
+      ? { ...visibleFilter, ...OTP_ACTION_CATEGORIES[category] }
       : visibleFilter;
     const hiddenFilter = category
-      ? { ...baseFilter, failureReason: OTP_ACTION_CATEGORIES[category] }
+      ? { ...baseFilter, ...OTP_ACTION_CATEGORIES[category] }
       : baseFilter;
 
     const [
@@ -593,6 +601,7 @@ const getOtpActions = async (req, res) => {
       actionSummary,
       recaptchaCount,
       appUpdateCount,
+      rateLimitCount,
       breakdown,
     ] = await Promise.all([
       OtpAction.find(filter).sort({ createdAt: -1 }).skip(skip).limit(limit).lean(),
@@ -619,20 +628,21 @@ const getOtpActions = async (req, res) => {
           },
         },
       ]),
-      OtpAction.countDocuments({ ...visibleFilter, failureReason: OTP_ACTION_CATEGORIES.recaptcha }),
-      OtpAction.countDocuments({ ...visibleFilter, failureReason: OTP_ACTION_CATEGORIES.app_update }),
-      // Top reasons on the reCAPTCHA tab, top app builds on the app update tab.
+      OtpAction.countDocuments({ ...visibleFilter, ...OTP_ACTION_CATEGORIES.recaptcha }),
+      OtpAction.countDocuments({ ...visibleFilter, ...OTP_ACTION_CATEGORIES.app_update }),
+      OtpAction.countDocuments({ ...visibleFilter, ...OTP_ACTION_CATEGORIES.rate_limit }),
+      // Top reasons on the reCAPTCHA and rate limit tabs, top app builds on the app update tab.
       category
         ? OtpAction.aggregate([
             { $match: filter },
             {
               $group: {
-                _id: category === "recaptcha" ? "$failureReason" : "$appVersionCode",
+                _id: OTP_ACTION_BREAKDOWN_FIELDS[category],
                 count: { $sum: 1 },
               },
             },
             { $sort: { count: -1 } },
-            { $limit: 3 },
+            { $limit: category === "rate_limit" ? 6 : 3 },
           ])
         : [],
     ]);
@@ -679,6 +689,7 @@ const getOtpActions = async (req, res) => {
         categoryCounts: {
           recaptcha: recaptchaCount,
           app_update: appUpdateCount,
+          rate_limit: rateLimitCount,
         },
         breakdown: breakdown.map((item) => ({ key: item._id ?? null, count: item.count || 0 })),
       },
@@ -695,6 +706,48 @@ const getOtpActions = async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Failed to fetch OTP actions",
+      error: error.message,
+    });
+  }
+};
+
+const countRecaptchaChecksSince = async (since) => {
+  const [counts] = await RecaptchaCheck.aggregate([
+    { $match: { createdAt: { $gte: since } } },
+    {
+      $group: {
+        _id: null,
+        total: { $sum: 1 },
+        assessed: { $sum: { $cond: ["$assessed", 1, 0] } },
+        passed: { $sum: { $cond: [{ $eq: ["$reason", "passed"] }, 1, 0] } },
+        blocked: { $sum: { $cond: ["$allowed", 0, 1] } },
+      },
+    },
+  ]);
+  const { total = 0, assessed = 0, passed = 0, blocked = 0 } = counts || {};
+
+  return { total, assessed, passed, blocked, skipped: total - passed - blocked };
+};
+
+const getRecaptchaStats = async (_req, res) => {
+  try {
+    const now = Date.now();
+    const [lastHour, last24Hours] = await Promise.all([
+      countRecaptchaChecksSince(new Date(now - 60 * 60 * 1000)),
+      countRecaptchaChecksSince(new Date(now - 24 * 60 * 60 * 1000)),
+    ]);
+
+    return res.status(200).json({
+      success: true,
+      message: "reCAPTCHA stats fetched successfully",
+      data: { lastHour, last24Hours, generatedAt: new Date(now) },
+    });
+  } catch (error) {
+    console.error("Get reCAPTCHA stats error:", error.message);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch reCAPTCHA stats",
       error: error.message,
     });
   }
@@ -1023,6 +1076,7 @@ const unblockOtpIp = async (req, res) => {
 
 module.exports = {
   getOtpActions,
+  getRecaptchaStats,
   wipeTodayOtpActions,
   getOtpActionsReport,
   wipeOtpActionsByDateRange,

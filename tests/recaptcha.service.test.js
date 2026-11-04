@@ -3,7 +3,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const vm = require("node:vm");
 
-const load = ({ googleCalls = [], required = false } = {}) => {
+const load = ({ googleCalls = [], required = false, checks = [] } = {}) => {
   const modules = {
     axios: {
       default: {
@@ -21,6 +21,7 @@ const load = ({ googleCalls = [], required = false } = {}) => {
       RECAPTCHA_MIN_SCORE: 0.5,
       RECAPTCHA_REQUIRED: required,
     },
+    "../models/recaptchaCheck.model": { create: async (doc) => { checks.push(doc); } },
   };
   const context = { module: { exports: {} }, require: (name) => modules[name], console, Number, Boolean };
   vm.runInNewContext(fs.readFileSync(require.resolve("../services/recaptcha.service"), "utf8"), context);
@@ -63,4 +64,27 @@ test("a missing token is still allowed while RECAPTCHA_REQUIRED is off", async (
   assert.equal(result.allowed, true);
   assert.equal(result.reason, "token_missing");
   assert.equal(googleCalls.length, 0);
+});
+
+test("a check scored by Google is recorded as assessed", async () => {
+  const checks = [];
+  const { verifySendOtpRecaptcha } = load({ checks });
+
+  await verifySendOtpRecaptcha({ token: "a".repeat(600), source: "mobile" });
+
+  assert.equal(checks.length, 1);
+  assert.equal(checks[0].reason, "passed");
+  assert.equal(checks[0].allowed, true);
+  assert.equal(checks[0].assessed, true);
+});
+
+test("a check rejected without calling Google is recorded as not assessed", async () => {
+  const checks = [];
+  const { verifySendOtpRecaptcha } = load({ checks });
+
+  await verifySendOtpRecaptcha({ token: "abc123", source: "mobile" });
+
+  assert.equal(checks[0].reason, "invalid_token_MALFORMED");
+  assert.equal(checks[0].allowed, false);
+  assert.equal(checks[0].assessed, false);
 });

@@ -3,7 +3,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const vm = require("node:vm");
 
-const load = ({ blockedIps = [], calls }) => {
+const load = ({ blockedIps = [], calls, recaptchaRows = [] }) => {
   const q = Promise.resolve([]);
   q.sort = () => q;
   q.skip = (value) => { calls.skip = value; return q; };
@@ -24,6 +24,7 @@ const load = ({ blockedIps = [], calls }) => {
       },
     },
     "../models/otpBlockedIp.model": { distinct: async () => blockedIps },
+    "../models/recaptchaCheck.model": { aggregate: async () => recaptchaRows },
   };
   const context = { module: { exports: {} }, require: (name) => modules[name], console, Date, Promise, Number, Math, String, Object, Array, Buffer, Intl };
   vm.runInNewContext(fs.readFileSync(require.resolve("../controllers/otp.controller"), "utf8"), context);
@@ -97,7 +98,41 @@ test("the all tab has no category filter but still reports both tab counts", asy
   assert.equal(calls.findFilter.failureReason, undefined);
   assert.equal(calls.pipelines.length, 2);
   assert.equal(res.body.filters.category, "all");
-  assert.deepEqual(res.body.summary.categoryCounts, { recaptcha: 40, app_update: 40 });
+  assert.deepEqual(res.body.summary.categoryCounts, { recaptcha: 40, app_update: 40, rate_limit: 40 });
+});
+
+test("the rate limit tab only returns rate limited rows and breaks them down by reason", async () => {
+  const { res, calls } = await run({ query: { category: "rate_limit" }, blockedIps: ["1.1.1.1"] });
+
+  assert.equal(calls.findFilter.deliveryStatus, "rate_limited");
+  assert.equal(calls.findFilter.failureReason, undefined);
+  assert.deepEqual(JSON.parse(JSON.stringify(calls.findFilter.sourceIpAddress)), { $nin: ["1.1.1.1"] });
+  assert.equal(calls.pipelines[2][1].$group._id, "$providerResponse.reason");
+  assert.equal(res.body.filters.category, "rate_limit");
+});
+
+const runRecaptchaStats = async (recaptchaRows) => {
+  const { getRecaptchaStats } = load({ calls: { counts: [], pipelines: [] }, recaptchaRows });
+  const res = {
+    status(code) { res.code = code; return res; },
+    json(body) { res.body = JSON.parse(JSON.stringify(body)); return res; },
+  };
+  await getRecaptchaStats({}, res);
+  return res;
+};
+
+test("reCAPTCHA stats report checks that were neither passed nor blocked as skipped", async () => {
+  const res = await runRecaptchaStats([{ total: 10, assessed: 7, passed: 6, blocked: 2 }]);
+
+  assert.equal(res.code, 200);
+  assert.deepEqual(res.body.data.lastHour, { total: 10, assessed: 7, passed: 6, blocked: 2, skipped: 2 });
+  assert.deepEqual(res.body.data.last24Hours, { total: 10, assessed: 7, passed: 6, blocked: 2, skipped: 2 });
+});
+
+test("reCAPTCHA stats are all zero when there are no checks", async () => {
+  const res = await runRecaptchaStats([]);
+
+  assert.deepEqual(res.body.data.lastHour, { total: 0, assessed: 0, passed: 0, blocked: 0, skipped: 0 });
 });
 
 test("pages past 1000 are not silently capped", async () => {
