@@ -43,6 +43,21 @@ const otpBlockedIpSchema = new mongoose.Schema(
       type: Date,
       default: null,
     },
+    // Null means the block lasts until an admin removes it.
+    expiresAt: {
+      type: Date,
+      default: null,
+    },
+    autoBlocked: {
+      type: Boolean,
+      default: false,
+    },
+    // Kept apart from `reason`, which is returned to the blocked caller.
+    autoBlockReason: {
+      type: String,
+      default: null,
+      trim: true,
+    },
     matchCount: {
       type: Number,
       default: 0,

@@ -25,6 +25,7 @@ const load = ({ blockedIps = [], calls, recaptchaRows = [] }) => {
     },
     "../models/otpBlockedIp.model": { distinct: async () => blockedIps },
     "../models/recaptchaCheck.model": { aggregate: async () => recaptchaRows },
+    "../utils/otpBlockFilter": require("../utils/otpBlockFilter"),
   };
   const context = { module: { exports: {} }, require: (name) => modules[name], console, Date, Promise, Number, Math, String, Object, Array, Buffer, Intl };
   vm.runInNewContext(fs.readFileSync(require.resolve("../controllers/otp.controller"), "utf8"), context);

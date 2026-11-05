@@ -1,6 +1,11 @@
 const OtpAction = require("../models/otpAction.model");
 const OtpBlockedIp = require("../models/otpBlockedIp.model");
 const RecaptchaCheck = require("../models/recaptchaCheck.model");
+const {
+  activeBlockFilter,
+  inactiveBlockFilter,
+  isBlockActive,
+} = require("../utils/otpBlockFilter");
 
 const escapeRegex = (value) =>
   String(value || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -31,9 +36,9 @@ const buildBlockedIpFilter = (query = {}) => {
     const normalizedStatus = String(query.status || "").trim().toLowerCase();
 
     if (normalizedStatus === "blocked") {
-      filter.isBlocked = true;
+      Object.assign(filter, activeBlockFilter());
     } else if (normalizedStatus === "unblocked") {
-      filter.isBlocked = false;
+      Object.assign(filter, inactiveBlockFilter());
     }
   }
 
@@ -52,11 +57,15 @@ const formatBlockedIp = (doc) => {
     ipAddress: value.ipAddress,
     reason: value.reason,
     note: value.note,
-    isBlocked: value.isBlocked,
+    // An expired auto-block stays stored as isBlocked, but no longer blocks anyone.
+    isBlocked: isBlockActive(value),
+    autoBlocked: Boolean(value.autoBlocked),
+    autoBlockReason: value.autoBlockReason || null,
+    expiresAt: value.expiresAt || null,
     blockedBy: value.blockedBy,
     blockedByEmail: value.blockedByEmail,
     blockedAt: value.blockedAt,
-    unblockedAt: value.unblockedAt,
+    unblockedAt: value.unblockedAt || (value.isBlocked ? value.expiresAt : null) || null,
     matchCount: value.matchCount,
     lastMatchedAt: value.lastMatchedAt,
     source: value.source,
@@ -512,9 +521,7 @@ const getPositiveInt = (value, fallback, max = 100) => {
 };
 
 const getActiveBlockedIpAddresses = async () => {
-  const blockedIps = await OtpBlockedIp.distinct("ipAddress", {
-    isBlocked: true,
-  });
+  const blockedIps = await OtpBlockedIp.distinct("ipAddress", activeBlockFilter());
 
   return blockedIps
     .map((ip) => normalizeIpAddress(ip))
@@ -944,6 +951,9 @@ const blockOtpIp = async (req, res) => {
           blockedByEmail,
           blockedAt: new Date(),
           unblockedAt: null,
+          expiresAt: null,
+          autoBlocked: false,
+          autoBlockReason: null,
           source,
           sourceRaw: normalizeBlockText(req.body?.sourceRaw),
           sourceUserAgent,
@@ -995,6 +1005,11 @@ const updateBlockedOtpIp = async (req, res) => {
 
     if (req.body?.isBlocked !== undefined) {
       updates.isBlocked = Boolean(req.body.isBlocked);
+      // An admin's decision replaces any auto-block, so it neither expires nor
+      // counts as an earlier offence later.
+      updates.expiresAt = null;
+      updates.autoBlocked = false;
+      updates.autoBlockReason = null;
       if (!updates.isBlocked) {
         updates.unblockedAt = new Date();
       } else {
@@ -1044,6 +1059,9 @@ const unblockOtpIp = async (req, res) => {
         $set: {
           isBlocked: false,
           unblockedAt: new Date(),
+          expiresAt: null,
+          autoBlocked: false,
+          autoBlockReason: null,
           blockedBy: adminName,
           blockedByEmail: adminEmail,
         },

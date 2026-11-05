@@ -26,6 +26,9 @@ const load = ({
   recaptcha = { allowed: true, reason: "passed" },
   recaptchaCalls = [],
   recaptchaFailures = async () => 0,
+  autoBlockCalls = [],
+  failuresClearedAt = null,
+  blockedIpFilters = [],
   providerResponse = { status: 200, data: { return: true, request_id: "r1" } },
 }) => {
   const modules = {
@@ -35,8 +38,13 @@ const load = ({
     "../config/config": { FAST2SMS_API_KEY: "k", FAST2SMS_OTP_ID: "id", MIN_OTP_APP_BUILD_CODE: 24 },
     "../models/otp.model": otp,
     "../models/otpAction.model": { create: async () => {}, countDocuments: async () => 0, distinct: async () => [], find: () => findQuery([]), ...otpAction },
-    "../models/otpBlockedIp.model": { findOne: () => query(null) },
+    "../models/otpBlockedIp.model": { findOne: (filter) => { blockedIpFilters.push(filter); return query(null); } },
     "../models/users.model": {},
+    "../services/otpAutoBlock.service": {
+      autoBlockIpIfNeeded: async (args) => { autoBlockCalls.push(args); return null; },
+      getIpFailuresClearedAt: async () => failuresClearedAt,
+    },
+    "../utils/otpBlockFilter": require("../utils/otpBlockFilter"),
     "../services/rewards.service": {},
     "../services/recaptcha.service": {
       verifySendOtpRecaptcha: async (args) => { recaptchaCalls.push(args); return recaptcha; },
@@ -60,7 +68,7 @@ const response = () => {
 
 const request = (ip = "1.2.3.4") => ({
   body: { phone: "9876543210" },
-  headers: { "user-agent": "Mozilla/5.0 Chrome", "x-forwarded-for": ip },
+  headers: { "user-agent": "Mozilla/5.0 Chrome", "x-real-ip": ip },
 });
 
 test("send-otp is rejected during the 30 second cooldown without calling the provider", async () => {
@@ -113,7 +121,7 @@ test("send-otp is rejected when one IP has already targeted too many numbers", a
   assert.equal(providerCalls.length, 0);
 });
 
-test("cloudflare client IP is used for IP limits instead of x-forwarded-for", async () => {
+test("IP limits use Railway's x-real-ip and ignore headers a caller can fake", async () => {
   const seenIps = [];
   const controller = load({
     otpAction: {
@@ -126,11 +134,12 @@ test("cloudflare client IP is used for IP limits instead of x-forwarded-for", as
 
   const req = request("9.9.9.9");
   req.headers["cf-connecting-ip"] = "5.6.7.8";
+  req.headers["x-forwarded-for"] = "5.6.7.9";
   const res = response();
   await controller.sendOTP(req, res);
 
   assert.equal(res.code, 429);
-  assert.equal(seenIps[0], "5.6.7.8");
+  assert.equal(seenIps[0], "9.9.9.9");
 });
 
 test("send-otp goes to the provider when no limit is hit", async () => {
@@ -247,6 +256,61 @@ test("send-otp locks an IP for a day once it passes the daily failure limit", as
   assert.equal(res.code, 429);
   assert.equal(res.headers["Retry-After"], "86400");
   assert.equal(recaptchaCalls.length, 0);
+});
+
+test("a failed reCAPTCHA checks the IP for an auto-block", async () => {
+  const autoBlockCalls = [];
+  const controller = load({ autoBlockCalls, recaptcha: { allowed: false, reason: "low_score", score: 0.1 } });
+
+  await controller.sendOTP(request(), response());
+
+  assert.equal(autoBlockCalls.length, 1);
+  assert.equal(autoBlockCalls[0].ipAddress, "1.2.3.4");
+});
+
+test("a passed reCAPTCHA never triggers an auto-block", async () => {
+  const autoBlockCalls = [];
+  const session = { phone: "9876543210", sendCount: 0, status: "pending", firstSentAt: new Date(), save: async () => {} };
+  const controller = load({
+    autoBlockCalls,
+    otp: { findOneAndUpdate: async () => session, findOne: () => query(session) },
+  });
+
+  await controller.sendOTP(request(), response());
+
+  assert.equal(autoBlockCalls.length, 0);
+});
+
+test("the blocked IP check ignores expired blocks", async () => {
+  const blockedIpFilters = [];
+  const controller = load({ blockedIpFilters });
+
+  await controller.sendOTP(request(), response());
+
+  const filter = blockedIpFilters[0];
+  assert.equal(filter.ipAddress, "1.2.3.4");
+  assert.equal(filter.isBlocked, true);
+  assert.equal(filter.$or[0].expiresAt, null);
+  assert.ok(filter.$or[1].expiresAt.$gt instanceof Date);
+});
+
+test("an admin's unblock stops earlier failures from limiting the IP", async () => {
+  const recaptchaCalls = [];
+  const failuresClearedAt = new Date(Date.now() - 60 * 1000);
+  const session = { phone: "9876543210", sendCount: 0, status: "pending", firstSentAt: new Date(), save: async () => {} };
+  const controller = load({
+    recaptchaCalls,
+    failuresClearedAt,
+    // Five failures exist, all from before the unblock.
+    recaptchaFailures: async (filter, since) => (filter.ipAddress && since < failuresClearedAt ? 5 : 0),
+    otp: { findOneAndUpdate: async () => session, findOne: () => query(session) },
+  });
+
+  const res = response();
+  await controller.sendOTP(request(), res);
+
+  assert.equal(res.code, 200);
+  assert.equal(recaptchaCalls.length, 1);
 });
 
 test("reCAPTCHA failures under the limits still reach reCAPTCHA", async () => {

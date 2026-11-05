@@ -22,6 +22,8 @@ const OtpBlockedIp = require("../models/otpBlockedIp.model");
 const User = require("../models/users.model");
 const { creditSignupBonus, getPointBalance } = require("../services/rewards.service");
 const { verifySendOtpRecaptcha, countRecaptchaFailures } = require("../services/recaptcha.service");
+const { autoBlockIpIfNeeded, getIpFailuresClearedAt } = require("../services/otpAutoBlock.service");
+const { activeBlockFilter } = require("../utils/otpBlockFilter");
 
 const googleClient = new OAuth2Client();
 
@@ -261,12 +263,13 @@ const resolveOtpSourceContext = (req) => {
       "",
   ).trim();
   const userAgent = String(req.headers?.["user-agent"] || "").trim().slice(0, 255) || null;
-  const cloudflareIp = String(req.headers?.["cf-connecting-ip"] || "").trim();
-  const forwardedFor = String(req.headers?.["x-forwarded-for"] || "").split(",")[0].trim();
+  // Railway's edge sets X-Real-IP itself. The API is not behind Cloudflare, so
+  // callers can put any value in cf-connecting-ip and x-forwarded-for, which
+  // would let them dodge IP limits or get someone else's IP blocked.
+  const railwayIp = String(req.headers?.["x-real-ip"] || "").trim();
   const ipAddress =
     normalizeRequestIp(
-      cloudflareIp ||
-        forwardedFor ||
+      railwayIp ||
         req.ip ||
         req.socket?.remoteAddress ||
         req.connection?.remoteAddress ||
@@ -334,7 +337,7 @@ const rejectIfBlockedOtpIp = async (req, res, actionType) => {
 
   const blockedIp = await OtpBlockedIp.findOne({
     ipAddress: sourceIpAddress,
-    isBlocked: true,
+    ...activeBlockFilter(),
   }).lean();
 
   if (!blockedIp) {
@@ -533,10 +536,14 @@ const getPhoneWindowViolation = async (phone, now) => {
 // Stops repeat reCAPTCHA failures before they reach Google. The phone limit
 // still applies when an abuser rotates IPs.
 const getRecaptchaFailureViolation = async ({ phone, sourceIpAddress, hourAgo, dayAgo }) => {
+  const clearedAt = await getIpFailuresClearedAt(sourceIpAddress);
+  const ipSince = (windowStart) =>
+    clearedAt && clearedAt > windowStart ? clearedAt : windowStart;
+
   const [phoneHourly, ipHourly, ipDaily] = await Promise.all([
     countRecaptchaFailures({ phone }, hourAgo),
-    sourceIpAddress ? countRecaptchaFailures({ ipAddress: sourceIpAddress }, hourAgo) : 0,
-    sourceIpAddress ? countRecaptchaFailures({ ipAddress: sourceIpAddress }, dayAgo) : 0,
+    sourceIpAddress ? countRecaptchaFailures({ ipAddress: sourceIpAddress }, ipSince(hourAgo)) : 0,
+    sourceIpAddress ? countRecaptchaFailures({ ipAddress: sourceIpAddress }, ipSince(dayAgo)) : 0,
   ]);
 
   const overDailyLimit = ipDaily >= RECAPTCHA_IP_DAILY_FAILURE_LIMIT;
@@ -755,6 +762,11 @@ const rejectIfRecaptchaFailed = async ({ req, res, actionType, phone, sourceCont
     status: "blocked",
     failureReason: `recaptcha_${result.reason}`,
     providerResponse: { recaptcha: result },
+  });
+
+  await autoBlockIpIfNeeded({
+    ipAddress: sourceContext.sourceIpAddress,
+    sourceUserAgent: sourceContext.sourceUserAgent,
   });
 
   res.status(403).json({
