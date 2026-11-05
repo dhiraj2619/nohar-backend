@@ -80,27 +80,35 @@ const assessSendOtpToken = async ({ token, source }) => {
   }
 };
 
-const recordRecaptchaCheck = async (result) => {
+const recordRecaptchaCheck = async (result, { phone, ipAddress }) => {
   try {
     await RecaptchaCheck.create({
       reason: result.reason,
       allowed: result.allowed,
       // Only a response from Google carries a score.
       assessed: result.score !== undefined,
+      phone: phone || null,
+      ipAddress: ipAddress || null,
     });
   } catch (error) {
     console.error("reCAPTCHA check record failed:", error.message);
   }
 };
 
-const verifySendOtpRecaptcha = async ({ token, source }) => {
+const verifySendOtpRecaptcha = async ({ token, source, phone, ipAddress }) => {
   const result = await assessSendOtpToken({ token, source });
 
-  await recordRecaptchaCheck(result);
+  await recordRecaptchaCheck(result, { phone, ipAddress });
 
   return result;
 };
 
+// Reads RecaptchaCheck rather than OtpAction because the admin wipe buttons
+// delete OtpAction rows, which would hand an abuser a fresh allowance.
+const countRecaptchaFailures = (filter, since) =>
+  RecaptchaCheck.countDocuments({ ...filter, allowed: false, createdAt: { $gte: since } });
+
 module.exports = {
   verifySendOtpRecaptcha,
+  countRecaptchaFailures,
 };

@@ -18,11 +18,23 @@ const recaptchaCheckSchema = new mongoose.Schema(
       type: Boolean,
       default: false,
     },
+    phone: {
+      type: String,
+      default: null,
+      trim: true,
+    },
+    ipAddress: {
+      type: String,
+      default: null,
+      trim: true,
+    },
   },
   { timestamps: { createdAt: true, updatedAt: false } },
 );
 
 recaptchaCheckSchema.index({ createdAt: 1 }, { expireAfterSeconds: RETENTION_SECONDS });
+recaptchaCheckSchema.index({ phone: 1, allowed: 1, createdAt: -1 });
+recaptchaCheckSchema.index({ ipAddress: 1, allowed: 1, createdAt: -1 });
 
 const RecaptchaCheck = mongoose.model("RecaptchaCheck", recaptchaCheckSchema);
 

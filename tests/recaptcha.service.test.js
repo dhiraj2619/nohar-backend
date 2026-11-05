@@ -78,6 +78,16 @@ test("a check scored by Google is recorded as assessed", async () => {
   assert.equal(checks[0].assessed, true);
 });
 
+test("a check is recorded with the phone and IP so failures can be limited", async () => {
+  const checks = [];
+  const { verifySendOtpRecaptcha } = load({ checks });
+
+  await verifySendOtpRecaptcha({ token: "abc123", source: "mobile", phone: "9876543210", ipAddress: "1.2.3.4" });
+
+  assert.equal(checks[0].phone, "9876543210");
+  assert.equal(checks[0].ipAddress, "1.2.3.4");
+});
+
 test("a check rejected without calling Google is recorded as not assessed", async () => {
   const checks = [];
   const { verifySendOtpRecaptcha } = load({ checks });

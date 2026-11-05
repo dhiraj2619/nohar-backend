@@ -25,6 +25,7 @@ const load = ({
   providerCalls = [],
   recaptcha = { allowed: true, reason: "passed" },
   recaptchaCalls = [],
+  recaptchaFailures = async () => 0,
   providerResponse = { status: 200, data: { return: true, request_id: "r1" } },
 }) => {
   const modules = {
@@ -37,7 +38,10 @@ const load = ({
     "../models/otpBlockedIp.model": { findOne: () => query(null) },
     "../models/users.model": {},
     "../services/rewards.service": {},
-    "../services/recaptcha.service": { verifySendOtpRecaptcha: async (args) => { recaptchaCalls.push(args); return recaptcha; } },
+    "../services/recaptcha.service": {
+      verifySendOtpRecaptcha: async (args) => { recaptchaCalls.push(args); return recaptcha; },
+      countRecaptchaFailures: recaptchaFailures,
+    },
   };
   const context = { module: { exports: {} }, require: (name) => modules[name], console: { ...console, info: () => {} }, Date, Promise };
   vm.runInNewContext(fs.readFileSync(require.resolve("../controllers/user.controller"), "utf8"), context);
@@ -205,6 +209,62 @@ test("resend-otp does not call reCAPTCHA once an IP has hit its hourly request l
 
   assert.equal(res.code, 429);
   assert.equal(recaptchaCalls.length, 0);
+});
+
+// The controller passes a one hour or a one day cutoff, so the age of `since`
+// tells the windows apart.
+const failuresBy = ({ phoneHourly = 0, ipHourly = 0, ipDaily = 0 }) => async (filter, since) => {
+  if (filter.phone) return phoneHourly;
+  return Date.now() - since.getTime() > 2 * 60 * 60 * 1000 ? ipDaily : ipHourly;
+};
+
+for (const [label, handler, failures] of [
+  ["send-otp, IP over its hourly failure limit", "sendOTP", { ipHourly: 5 }],
+  ["resend-otp, IP over its hourly failure limit", "resendOTP", { ipHourly: 5 }],
+  ["send-otp, number over its hourly failure limit from rotating IPs", "sendOTP", { phoneHourly: 10 }],
+]) {
+  test(`${label}: does not call reCAPTCHA`, async () => {
+    const recaptchaCalls = [];
+    const controller = load({ recaptchaCalls, recaptchaFailures: failuresBy(failures) });
+
+    const res = response();
+    await controller[handler](request(), res);
+
+    assert.equal(res.code, 429);
+    assert.equal(res.body.code, "TOO_MANY_REQUESTS");
+    assert.equal(res.headers["Retry-After"], "3600");
+    assert.equal(recaptchaCalls.length, 0);
+  });
+}
+
+test("send-otp locks an IP for a day once it passes the daily failure limit", async () => {
+  const recaptchaCalls = [];
+  const controller = load({ recaptchaCalls, recaptchaFailures: failuresBy({ ipDaily: 20 }) });
+
+  const res = response();
+  await controller.sendOTP(request(), res);
+
+  assert.equal(res.code, 429);
+  assert.equal(res.headers["Retry-After"], "86400");
+  assert.equal(recaptchaCalls.length, 0);
+});
+
+test("reCAPTCHA failures under the limits still reach reCAPTCHA", async () => {
+  const recaptchaCalls = [];
+  const session = { phone: "9876543210", sendCount: 0, status: "pending", firstSentAt: new Date(), save: async () => {} };
+  const controller = load({
+    recaptchaCalls,
+    recaptchaFailures: failuresBy({ phoneHourly: 9, ipHourly: 4, ipDaily: 19 }),
+    otp: { findOneAndUpdate: async () => session, findOne: () => query(session) },
+  });
+
+  const res = response();
+  await controller.sendOTP(request(), res);
+
+  assert.equal(res.code, 200);
+  assert.equal(recaptchaCalls.length, 1);
+  assert.equal(recaptchaCalls[0].phone, "9876543210");
+  assert.equal(recaptchaCalls[0].ipAddress, "1.2.3.4");
 });
 
 test("a failed reCAPTCHA does not use up the number's cooldown slot", async () => {
