@@ -45,6 +45,7 @@ const load = ({
       getIpFailuresClearedAt: async () => failuresClearedAt,
     },
     "../utils/otpBlockFilter": require("../utils/otpBlockFilter"),
+    "../utils/otpBotGuard": require("../utils/otpBotGuard"),
     "../services/rewards.service": {},
     "../services/recaptcha.service": {
       verifySendOtpRecaptcha: async (args) => { recaptchaCalls.push(args); return recaptcha; },
@@ -403,4 +404,53 @@ test("verify-otp stops checking with the provider after 5 wrong attempts", async
   assert.equal(res.body.code, "OTP_ATTEMPTS_EXCEEDED");
   assert.equal(session.status, "expired");
   assert.equal(providerCalls.length, 0);
+});
+
+test("send-otp from a Cloudflare IP is blocked before the provider and logged once per number", async () => {
+  const providerCalls = [];
+  const created = [];
+  const blockedIpFilters = [];
+  const controller = load({
+    providerCalls,
+    blockedIpFilters,
+    otpAction: { create: async (row) => { created.push(row); } },
+  });
+
+  for (const ip of ["162.158.216.86", "172.69.176.10", "172.70.162.161"]) {
+    const res = response();
+    await controller.sendOTP(request(ip), res);
+    assert.equal(res.code, 403);
+  }
+
+  assert.equal(providerCalls.length, 0);
+  assert.equal(blockedIpFilters.length, 0);
+  assert.equal(created.length, 1);
+  assert.match(created[0].failureReason, /^Bot blocked: request relayed through Cloudflare IP/);
+});
+
+test("a request carrying the CF-Worker header is blocked and names the Worker", async () => {
+  const created = [];
+  const controller = load({ otpAction: { create: async (row) => { created.push(row); } } });
+  const req = request("9.9.9.9");
+  req.headers["cf-worker"] = "evil.example";
+  const res = response();
+  await controller.verifyOTP(req, res);
+
+  assert.equal(res.code, 403);
+  assert.match(created[0].failureReason, /Cloudflare Worker \(evil\.example\)/);
+});
+
+test("repeated app-update blocks for one number are logged once per 10 minutes", async () => {
+  const created = [];
+  const controller = load({ otpAction: { create: async (row) => { created.push(row); } } });
+
+  for (let i = 0; i < 3; i += 1) {
+    const req = request("9.9.9.9");
+    req.headers["user-agent"] = "okhttp/4.12.0";
+    const res = response();
+    await controller.sendOTP(req, res);
+    assert.equal(res.code, 426);
+  }
+
+  assert.equal(created.length, 1);
 });

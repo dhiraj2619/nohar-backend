@@ -24,6 +24,7 @@ const { creditSignupBonus, getPointBalance } = require("../services/rewards.serv
 const { verifySendOtpRecaptcha, countRecaptchaFailures } = require("../services/recaptcha.service");
 const { autoBlockIpIfNeeded, getIpFailuresClearedAt } = require("../services/otpAutoBlock.service");
 const { activeBlockFilter } = require("../utils/otpBlockFilter");
+const { getCloudflareRelayReason } = require("../utils/otpBotGuard");
 
 const googleClient = new OAuth2Client();
 
@@ -327,9 +328,49 @@ const recordBlockedOtpAttempt = async ({
   }
 };
 
+// A bot can repeat a rejected request thousands of times an hour. One row per
+// number every 10 minutes still shows the attack in OTP Actions without filling
+// the database. The map is per server instance and is emptied when it grows large.
+const REPEAT_BLOCK_LOG_INTERVAL_MS = 10 * 60 * 1000;
+const REPEAT_BLOCK_LOG_MAX_KEYS = 5000;
+const repeatBlockLoggedAt = new Map();
+
+const shouldLogRepeatBlock = (key, now = Date.now()) => {
+  const lastLoggedAt = repeatBlockLoggedAt.get(key);
+
+  if (lastLoggedAt && now - lastLoggedAt < REPEAT_BLOCK_LOG_INTERVAL_MS) {
+    return false;
+  }
+
+  if (repeatBlockLoggedAt.size >= REPEAT_BLOCK_LOG_MAX_KEYS) {
+    repeatBlockLoggedAt.clear();
+  }
+
+  repeatBlockLoggedAt.set(key, now);
+  return true;
+};
+
+const BOT_BLOCK_MESSAGE = "Access blocked";
+
 const rejectIfBlockedOtpIp = async (req, res, actionType) => {
   const sourceContext = resolveOtpSourceContext(req);
   const sourceIpAddress = sourceContext.sourceIpAddress;
+  const relayReason = getCloudflareRelayReason(req.headers, sourceIpAddress);
+
+  if (relayReason) {
+    const phone = normalizeAuthPhone(req.body);
+
+    if (shouldLogRepeatBlock(`bot:${actionType || "other"}:${phone || "-"}`)) {
+      await recordBlockedOtpAttempt({
+        actionType,
+        phone,
+        sourceContext,
+        reason: `Bot blocked: request relayed through ${relayReason}`,
+      });
+    }
+
+    return { blocked: true, sourceContext, reason: BOT_BLOCK_MESSAGE };
+  }
 
   if (!sourceIpAddress) {
     return { blocked: false, sourceContext };
@@ -1078,16 +1119,18 @@ const sendOTP = async (req, res) => {
         requiredVersionCode: blockDetails.requiredVersionCode,
       });
 
-      await recordOtpAction({
-        phone: cleanPhone,
-        actionType: "send",
-        sourceContext,
-        traceId,
-        deliveryStatus: "blocked",
-        status: "blocked",
-        failureReason: blockDetails.message,
-        providerResponse: blockDetails,
-      });
+      if (shouldLogRepeatBlock(`app_update:send:${cleanPhone}`)) {
+        await recordOtpAction({
+          phone: cleanPhone,
+          actionType: "send",
+          sourceContext,
+          traceId,
+          deliveryStatus: "blocked",
+          status: "blocked",
+          failureReason: blockDetails.message,
+          providerResponse: blockDetails,
+        });
+      }
 
       return res.status(426).json({
         success: false,
@@ -1358,16 +1401,18 @@ const resendOTP = async (req, res) => {
         requiredVersionCode: blockDetails.requiredVersionCode,
       });
 
-      await recordOtpAction({
-        phone: cleanPhone,
-        actionType: "resend",
-        sourceContext,
-        traceId,
-        deliveryStatus: "blocked",
-        status: "blocked",
-        failureReason: blockDetails.message,
-        providerResponse: blockDetails,
-      });
+      if (shouldLogRepeatBlock(`app_update:resend:${cleanPhone}`)) {
+        await recordOtpAction({
+          phone: cleanPhone,
+          actionType: "resend",
+          sourceContext,
+          traceId,
+          deliveryStatus: "blocked",
+          status: "blocked",
+          failureReason: blockDetails.message,
+          providerResponse: blockDetails,
+        });
+      }
 
       return res.status(426).json({
         success: false,
