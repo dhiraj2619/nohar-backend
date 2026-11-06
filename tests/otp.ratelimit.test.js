@@ -25,9 +25,6 @@ const load = ({
   providerCalls = [],
   recaptcha = { allowed: true, reason: "passed" },
   recaptchaCalls = [],
-  recaptchaFailures = async () => 0,
-  autoBlockCalls = [],
-  failuresClearedAt = null,
   blockedIpFilters = [],
   providerResponse = { status: 200, data: { return: true, request_id: "r1" } },
 }) => {
@@ -40,16 +37,11 @@ const load = ({
     "../models/otpAction.model": { create: async () => {}, countDocuments: async () => 0, distinct: async () => [], find: () => findQuery([]), ...otpAction },
     "../models/otpBlockedIp.model": { findOne: (filter) => { blockedIpFilters.push(filter); return query(null); } },
     "../models/users.model": {},
-    "../services/otpAutoBlock.service": {
-      autoBlockIpIfNeeded: async (args) => { autoBlockCalls.push(args); return null; },
-      getIpFailuresClearedAt: async () => failuresClearedAt,
-    },
     "../utils/otpBlockFilter": require("../utils/otpBlockFilter"),
     "../utils/otpBotGuard": require("../utils/otpBotGuard"),
     "../services/rewards.service": {},
     "../services/recaptcha.service": {
       verifySendOtpRecaptcha: async (args) => { recaptchaCalls.push(args); return recaptcha; },
-      countRecaptchaFailures: recaptchaFailures,
     },
   };
   const context = { module: { exports: {} }, require: (name) => modules[name], console: { ...console, info: () => {} }, Date, Promise };
@@ -221,67 +213,6 @@ test("resend-otp does not call reCAPTCHA once an IP has hit its hourly request l
   assert.equal(recaptchaCalls.length, 0);
 });
 
-// The controller passes a one hour or a one day cutoff, so the age of `since`
-// tells the windows apart.
-const failuresBy = ({ phoneHourly = 0, ipHourly = 0, ipDaily = 0 }) => async (filter, since) => {
-  if (filter.phone) return phoneHourly;
-  return Date.now() - since.getTime() > 2 * 60 * 60 * 1000 ? ipDaily : ipHourly;
-};
-
-for (const [label, handler, failures] of [
-  ["send-otp, IP over its hourly failure limit", "sendOTP", { ipHourly: 5 }],
-  ["resend-otp, IP over its hourly failure limit", "resendOTP", { ipHourly: 5 }],
-  ["send-otp, number over its hourly failure limit from rotating IPs", "sendOTP", { phoneHourly: 10 }],
-]) {
-  test(`${label}: does not call reCAPTCHA`, async () => {
-    const recaptchaCalls = [];
-    const controller = load({ recaptchaCalls, recaptchaFailures: failuresBy(failures) });
-
-    const res = response();
-    await controller[handler](request(), res);
-
-    assert.equal(res.code, 429);
-    assert.equal(res.body.code, "TOO_MANY_REQUESTS");
-    assert.equal(res.headers["Retry-After"], "3600");
-    assert.equal(recaptchaCalls.length, 0);
-  });
-}
-
-test("send-otp locks an IP for a day once it passes the daily failure limit", async () => {
-  const recaptchaCalls = [];
-  const controller = load({ recaptchaCalls, recaptchaFailures: failuresBy({ ipDaily: 20 }) });
-
-  const res = response();
-  await controller.sendOTP(request(), res);
-
-  assert.equal(res.code, 429);
-  assert.equal(res.headers["Retry-After"], "86400");
-  assert.equal(recaptchaCalls.length, 0);
-});
-
-test("a failed reCAPTCHA checks the IP for an auto-block", async () => {
-  const autoBlockCalls = [];
-  const controller = load({ autoBlockCalls, recaptcha: { allowed: false, reason: "low_score", score: 0.1 } });
-
-  await controller.sendOTP(request(), response());
-
-  assert.equal(autoBlockCalls.length, 1);
-  assert.equal(autoBlockCalls[0].ipAddress, "1.2.3.4");
-});
-
-test("a passed reCAPTCHA never triggers an auto-block", async () => {
-  const autoBlockCalls = [];
-  const session = { phone: "9876543210", sendCount: 0, status: "pending", firstSentAt: new Date(), save: async () => {} };
-  const controller = load({
-    autoBlockCalls,
-    otp: { findOneAndUpdate: async () => session, findOne: () => query(session) },
-  });
-
-  await controller.sendOTP(request(), response());
-
-  assert.equal(autoBlockCalls.length, 0);
-});
-
 test("the blocked IP check ignores expired blocks", async () => {
   const blockedIpFilters = [];
   const controller = load({ blockedIpFilters });
@@ -293,43 +224,6 @@ test("the blocked IP check ignores expired blocks", async () => {
   assert.equal(filter.isBlocked, true);
   assert.equal(filter.$or[0].expiresAt, null);
   assert.ok(filter.$or[1].expiresAt.$gt instanceof Date);
-});
-
-test("an admin's unblock stops earlier failures from limiting the IP", async () => {
-  const recaptchaCalls = [];
-  const failuresClearedAt = new Date(Date.now() - 60 * 1000);
-  const session = { phone: "9876543210", sendCount: 0, status: "pending", firstSentAt: new Date(), save: async () => {} };
-  const controller = load({
-    recaptchaCalls,
-    failuresClearedAt,
-    // Five failures exist, all from before the unblock.
-    recaptchaFailures: async (filter, since) => (filter.ipAddress && since < failuresClearedAt ? 5 : 0),
-    otp: { findOneAndUpdate: async () => session, findOne: () => query(session) },
-  });
-
-  const res = response();
-  await controller.sendOTP(request(), res);
-
-  assert.equal(res.code, 200);
-  assert.equal(recaptchaCalls.length, 1);
-});
-
-test("reCAPTCHA failures under the limits still reach reCAPTCHA", async () => {
-  const recaptchaCalls = [];
-  const session = { phone: "9876543210", sendCount: 0, status: "pending", firstSentAt: new Date(), save: async () => {} };
-  const controller = load({
-    recaptchaCalls,
-    recaptchaFailures: failuresBy({ phoneHourly: 9, ipHourly: 4, ipDaily: 19 }),
-    otp: { findOneAndUpdate: async () => session, findOne: () => query(session) },
-  });
-
-  const res = response();
-  await controller.sendOTP(request(), res);
-
-  assert.equal(res.code, 200);
-  assert.equal(recaptchaCalls.length, 1);
-  assert.equal(recaptchaCalls[0].phone, "9876543210");
-  assert.equal(recaptchaCalls[0].ipAddress, "1.2.3.4");
 });
 
 test("a failed reCAPTCHA does not use up the number's cooldown slot", async () => {

@@ -21,8 +21,7 @@ const OtpAction = require("../models/otpAction.model");
 const OtpBlockedIp = require("../models/otpBlockedIp.model");
 const User = require("../models/users.model");
 const { creditSignupBonus, getPointBalance } = require("../services/rewards.service");
-const { verifySendOtpRecaptcha, countRecaptchaFailures } = require("../services/recaptcha.service");
-const { autoBlockIpIfNeeded, getIpFailuresClearedAt } = require("../services/otpAutoBlock.service");
+const { verifySendOtpRecaptcha } = require("../services/recaptcha.service");
 const { activeBlockFilter } = require("../utils/otpBlockFilter");
 const { getCloudflareRelayReason } = require("../utils/otpBotGuard");
 
@@ -526,9 +525,6 @@ const OTP_PHONE_DAILY_SMS_LIMIT = 10;
 const OTP_IP_HOURLY_SMS_LIMIT = 15;
 const OTP_IP_HOURLY_PHONE_LIMIT = 5;
 const OTP_IP_HOURLY_REQUEST_LIMIT = 60;
-const RECAPTCHA_PHONE_HOURLY_FAILURE_LIMIT = 10;
-const RECAPTCHA_IP_HOURLY_FAILURE_LIMIT = 5;
-const RECAPTCHA_IP_DAILY_FAILURE_LIMIT = 20;
 const OTP_DELIVERED_STATUSES = ["sent", "resent"];
 const ONE_HOUR_MS = 60 * 60 * 1000;
 const ONE_DAY_MS = 24 * ONE_HOUR_MS;
@@ -574,51 +570,9 @@ const getPhoneWindowViolation = async (phone, now) => {
   };
 };
 
-// Stops repeat reCAPTCHA failures before they reach Google. The phone limit
-// still applies when an abuser rotates IPs.
-const getRecaptchaFailureViolation = async ({ phone, sourceIpAddress, hourAgo, dayAgo }) => {
-  const clearedAt = await getIpFailuresClearedAt(sourceIpAddress);
-  const ipSince = (windowStart) =>
-    clearedAt && clearedAt > windowStart ? clearedAt : windowStart;
-
-  const [phoneHourly, ipHourly, ipDaily] = await Promise.all([
-    countRecaptchaFailures({ phone }, hourAgo),
-    sourceIpAddress ? countRecaptchaFailures({ ipAddress: sourceIpAddress }, ipSince(hourAgo)) : 0,
-    sourceIpAddress ? countRecaptchaFailures({ ipAddress: sourceIpAddress }, ipSince(dayAgo)) : 0,
-  ]);
-
-  const overDailyLimit = ipDaily >= RECAPTCHA_IP_DAILY_FAILURE_LIMIT;
-
-  if (
-    !overDailyLimit &&
-    phoneHourly < RECAPTCHA_PHONE_HOURLY_FAILURE_LIMIT &&
-    ipHourly < RECAPTCHA_IP_HOURLY_FAILURE_LIMIT
-  ) {
-    return null;
-  }
-
-  return {
-    reason: "recaptcha_failure_limit",
-    code: "TOO_MANY_REQUESTS",
-    message: "Too many OTP requests. Please try again later.",
-    retryAfterSeconds: (overDailyLimit ? ONE_DAY_MS : ONE_HOUR_MS) / 1000,
-  };
-};
-
 const getOtpRateLimitViolation = async ({ phone, sourceIpAddress, now }) => {
   const dayAgo = new Date(now.getTime() - ONE_DAY_MS);
   const hourAgo = new Date(now.getTime() - ONE_HOUR_MS);
-
-  const recaptchaViolation = await getRecaptchaFailureViolation({
-    phone,
-    sourceIpAddress,
-    hourAgo,
-    dayAgo,
-  });
-
-  if (recaptchaViolation) {
-    return recaptchaViolation;
-  }
 
   const phoneSmsCount = await OtpAction.countDocuments({
     phone,
@@ -803,11 +757,6 @@ const rejectIfRecaptchaFailed = async ({ req, res, actionType, phone, sourceCont
     status: "blocked",
     failureReason: `recaptcha_${result.reason}`,
     providerResponse: { recaptcha: result },
-  });
-
-  await autoBlockIpIfNeeded({
-    ipAddress: sourceContext.sourceIpAddress,
-    sourceUserAgent: sourceContext.sourceUserAgent,
   });
 
   res.status(403).json({

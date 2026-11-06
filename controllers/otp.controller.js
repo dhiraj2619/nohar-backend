@@ -888,6 +888,17 @@ const wipeAllOtpActions = async (_req, res) => {
   }
 };
 
+const BLOCKED_IP_SORT_FIELDS = ["ipAddress", "blockedAt", "unblockedAt", "matchCount", "lastMatchedAt"];
+
+// Only known fields are accepted, so a caller cannot sort on anything else.
+// _id breaks ties so rows do not move between pages.
+const buildBlockedIpSort = (query = {}) => {
+  const field = BLOCKED_IP_SORT_FIELDS.includes(query.sortBy) ? query.sortBy : "updatedAt";
+  const direction = query.sortOrder === "asc" ? 1 : -1;
+
+  return { [field]: direction, _id: direction };
+};
+
 const getBlockedOtpIps = async (req, res) => {
   try {
     const page = Math.max(Number(req.query.page || 1), 1);
@@ -896,7 +907,7 @@ const getBlockedOtpIps = async (req, res) => {
     const filter = buildBlockedIpFilter(req.query);
 
     const [items, total] = await Promise.all([
-      OtpBlockedIp.find(filter).sort({ updatedAt: -1 }).skip(skip).limit(limit),
+      OtpBlockedIp.find(filter).sort(buildBlockedIpSort(req.query)).skip(skip).limit(limit),
       OtpBlockedIp.countDocuments(filter),
     ]);
 

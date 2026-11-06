@@ -54,7 +54,6 @@ const RECAPTCHA_WEB_SITE_KEY = process.env.RECAPTCHA_WEB_SITE_KEY;
 const RECAPTCHA_MIN_SCORE = Number.parseFloat(process.env.RECAPTCHA_MIN_SCORE) || 0.5;
 // Keep "false" until most users run an app/website version that sends tokens.
 const RECAPTCHA_REQUIRED = process.env.RECAPTCHA_REQUIRED === "true";
-const OTP_AUTO_BLOCK_ENABLED = process.env.OTP_AUTO_BLOCK_ENABLED === "true";
 
 module.exports = {
   PORT,
@@ -98,5 +97,4 @@ module.exports = {
   RECAPTCHA_WEB_SITE_KEY,
   RECAPTCHA_MIN_SCORE,
   RECAPTCHA_REQUIRED,
-  OTP_AUTO_BLOCK_ENABLED,
 };

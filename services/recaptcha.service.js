@@ -103,12 +103,6 @@ const verifySendOtpRecaptcha = async ({ token, source, phone, ipAddress }) => {
   return result;
 };
 
-// Reads RecaptchaCheck rather than OtpAction because the admin wipe buttons
-// delete OtpAction rows, which would hand an abuser a fresh allowance.
-const countRecaptchaFailures = (filter, since) =>
-  RecaptchaCheck.countDocuments({ ...filter, allowed: false, createdAt: { $gte: since } });
-
 module.exports = {
   verifySendOtpRecaptcha,
-  countRecaptchaFailures,
 };
