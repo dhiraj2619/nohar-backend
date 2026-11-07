@@ -99,7 +99,16 @@ test("the all tab has no category filter but still reports both tab counts", asy
   assert.equal(calls.findFilter.failureReason, undefined);
   assert.equal(calls.pipelines.length, 2);
   assert.equal(res.body.filters.category, "all");
-  assert.deepEqual(res.body.summary.categoryCounts, { recaptcha: 40, app_update: 40, rate_limit: 40 });
+  assert.deepEqual(res.body.summary.categoryCounts, { recaptcha: 40, app_update: 40, rate_limit: 40, bot: 40 });
+});
+
+test("the bot tab only returns bot blocks and breaks them down by relay reason", async () => {
+  const { res, calls } = await run({ query: { category: "bot" }, blockedIps: ["1.1.1.1"] });
+
+  assert.equal(calls.findFilter.failureReason.$regex, "^Bot blocked");
+  assert.deepEqual(JSON.parse(JSON.stringify(calls.findFilter.sourceIpAddress)), { $nin: ["1.1.1.1"] });
+  assert.equal(calls.pipelines[2][1].$group._id, "$failureReason");
+  assert.equal(res.body.filters.category, "bot");
 });
 
 test("the rate limit tab only returns rate limited rows and breaks them down by reason", async () => {

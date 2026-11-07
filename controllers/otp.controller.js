@@ -494,12 +494,14 @@ const OTP_ACTION_CATEGORIES = {
   recaptcha: { failureReason: { $regex: "^recaptcha_" } },
   app_update: { failureReason: { $regex: "^App update required" } },
   rate_limit: { deliveryStatus: "rate_limited" },
+  bot: { failureReason: { $regex: "^Bot blocked" } },
 };
 
 const OTP_ACTION_BREAKDOWN_FIELDS = {
   recaptcha: "$failureReason",
   app_update: "$appVersionCode",
   rate_limit: "$providerResponse.reason",
+  bot: "$failureReason",
 };
 
 const normalizeCategoryFilter = (value) => {
@@ -609,6 +611,7 @@ const getOtpActions = async (req, res) => {
       recaptchaCount,
       appUpdateCount,
       rateLimitCount,
+      botCount,
       breakdown,
     ] = await Promise.all([
       OtpAction.find(filter).sort({ createdAt: -1 }).skip(skip).limit(limit).lean(),
@@ -638,7 +641,8 @@ const getOtpActions = async (req, res) => {
       OtpAction.countDocuments({ ...visibleFilter, ...OTP_ACTION_CATEGORIES.recaptcha }),
       OtpAction.countDocuments({ ...visibleFilter, ...OTP_ACTION_CATEGORIES.app_update }),
       OtpAction.countDocuments({ ...visibleFilter, ...OTP_ACTION_CATEGORIES.rate_limit }),
-      // Top reasons on the reCAPTCHA and rate limit tabs, top app builds on the app update tab.
+      OtpAction.countDocuments({ ...visibleFilter, ...OTP_ACTION_CATEGORIES.bot }),
+      // Top reasons on the reCAPTCHA, rate limit and bot tabs, top app builds on the app update tab.
       category
         ? OtpAction.aggregate([
             { $match: filter },
@@ -697,6 +701,7 @@ const getOtpActions = async (req, res) => {
           recaptcha: recaptchaCount,
           app_update: appUpdateCount,
           rate_limit: rateLimitCount,
+          bot: botCount,
         },
         breakdown: breakdown.map((item) => ({ key: item._id ?? null, count: item.count || 0 })),
       },
