@@ -1,8 +1,11 @@
-// The API is served straight from Railway, not through Cloudflare, so the real
-// app and website never reach it from a Cloudflare address. A request that does
-// was relayed by a Cloudflare Worker, which bots use to get a fresh IP on every
+// Bots relay requests through Cloudflare Workers to get a fresh IP on every
 // call. Blocking those IPs one at a time cannot keep up, so the whole network is
 // refused here.
+//
+// The IP checked here must be the end user's. For traffic through our own
+// Cloudflare zone that is CF-Connecting-IP (see resolveOtpSourceContext), which
+// is a Cloudflare address only when a Worker sent the request. Never pass the
+// connecting proxy's IP, or every customer behind our zone would be blocked.
 //
 // Source: https://www.cloudflare.com/ips/ . 104.24.0.0/14 is left out because
 // Cloudflare WARP, a consumer VPN that real customers may use, leaves from it.

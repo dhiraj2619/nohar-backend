@@ -6,6 +6,9 @@ const {
   RECAPTCHA_WEB_SITE_KEY,
   RECAPTCHA_MIN_SCORE,
   RECAPTCHA_REQUIRED,
+  RECAPTCHA_FAIL_OPEN,
+  RECAPTCHA_ANDROID_PACKAGE_NAME,
+  RECAPTCHA_WEB_HOSTNAMES,
 } = require("../config/config");
 const RecaptchaCheck = require("../models/recaptchaCheck.model");
 
@@ -17,24 +20,46 @@ const MIN_TOKEN_LENGTH = 100;
 const isRecaptchaConfigured = () =>
   Boolean(RECAPTCHA_PROJECT_ID && RECAPTCHA_API_KEY);
 
+const isWebsiteSource = (source) => source === "website";
+
 const getSiteKeyForSource = (source) =>
-  source === "website" ? RECAPTCHA_WEB_SITE_KEY : RECAPTCHA_ANDROID_SITE_KEY;
+  isWebsiteSource(source) ? RECAPTCHA_WEB_SITE_KEY : RECAPTCHA_ANDROID_SITE_KEY;
+
+// A token is tied to the app package or website hostname it was minted for.
+// Checking it stops tokens harvested from someone else's site or app build.
+const getOriginMismatch = (source, tokenProperties) => {
+  if (isWebsiteSource(source)) {
+    const hostname = String(tokenProperties.hostname || "").toLowerCase();
+    const allowed = RECAPTCHA_WEB_HOSTNAMES || [];
+
+    return allowed.length && !allowed.includes(hostname) ? "hostname_mismatch" : null;
+  }
+
+  if (
+    RECAPTCHA_ANDROID_PACKAGE_NAME &&
+    tokenProperties.androidPackageName !== RECAPTCHA_ANDROID_PACKAGE_NAME
+  ) {
+    return "package_mismatch";
+  }
+
+  return null;
+};
 
 // Returns { allowed, reason, score }.
-// Missing tokens are allowed unless RECAPTCHA_REQUIRED=true, so older app and
-// website versions keep working during rollout. If Google cannot be reached we
-// fail open (and log) rather than block every login.
+// Missing tokens are allowed only while RECAPTCHA_REQUIRED is off. If Google
+// cannot be reached the request is refused, unless RECAPTCHA_FAIL_OPEN is on.
 const assessSendOtpToken = async ({ token, source }) => {
   if (!isRecaptchaConfigured()) {
-    return { allowed: true, reason: "not_configured" };
+    return { allowed: !RECAPTCHA_REQUIRED, reason: "not_configured" };
   }
 
   const siteKey = getSiteKeyForSource(source);
 
   if (!token || !siteKey) {
-    return RECAPTCHA_REQUIRED
-      ? { allowed: false, reason: token ? "site_key_missing" : "token_missing" }
-      : { allowed: true, reason: token ? "site_key_missing" : "token_missing" };
+    return {
+      allowed: !RECAPTCHA_REQUIRED,
+      reason: token ? "site_key_missing" : "token_missing",
+    };
   }
 
   if (typeof token !== "string" || token.length < MIN_TOKEN_LENGTH) {
@@ -57,6 +82,7 @@ const assessSendOtpToken = async ({ token, source }) => {
     const tokenProperties = data?.tokenProperties || {};
     const score = Number(data?.riskAnalysis?.score ?? 0);
 
+    // Google marks expired (over 2 minutes old) and reused tokens invalid.
     if (!tokenProperties.valid) {
       return {
         allowed: false,
@@ -69,6 +95,12 @@ const assessSendOtpToken = async ({ token, source }) => {
       return { allowed: false, reason: "action_mismatch", score };
     }
 
+    const originMismatch = getOriginMismatch(source, tokenProperties);
+
+    if (originMismatch) {
+      return { allowed: false, reason: originMismatch, score };
+    }
+
     if (score < RECAPTCHA_MIN_SCORE) {
       return { allowed: false, reason: "low_score", score };
     }
@@ -76,7 +108,7 @@ const assessSendOtpToken = async ({ token, source }) => {
     return { allowed: true, reason: "passed", score };
   } catch (error) {
     console.error("reCAPTCHA assessment failed:", error?.response?.data || error.message);
-    return { allowed: true, reason: "assessment_error" };
+    return { allowed: Boolean(RECAPTCHA_FAIL_OPEN), reason: "assessment_error" };
   }
 };
 

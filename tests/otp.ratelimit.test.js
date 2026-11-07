@@ -135,6 +135,42 @@ test("IP limits use Railway's x-real-ip and ignore headers a caller can fake", a
   assert.equal(seenIps[0], "9.9.9.9");
 });
 
+test("behind our Cloudflare zone, IP limits use CF-Connecting-IP", async () => {
+  const seenIps = [];
+  const controller = load({
+    otpAction: {
+      countDocuments: async (filter) => {
+        if (filter.sourceIpAddress) seenIps.push(filter.sourceIpAddress);
+        return filter.sourceIpAddress ? 60 : 0;
+      },
+    },
+  });
+
+  // x-real-ip is Cloudflare's own address once Cloudflare sits in front.
+  const req = request("172.70.1.1");
+  req.viaCloudflareEdge = true;
+  req.headers["cf-connecting-ip"] = "49.36.12.5";
+  const res = response();
+  await controller.sendOTP(req, res);
+
+  assert.equal(res.code, 429);
+  assert.equal(seenIps[0], "49.36.12.5");
+});
+
+test("a Cloudflare Worker relaying through our zone is still blocked", async () => {
+  const providerCalls = [];
+  const controller = load({ providerCalls });
+
+  const req = request("172.70.1.1");
+  req.viaCloudflareEdge = true;
+  req.headers["cf-connecting-ip"] = "2a06:98c0:3600::103";
+  const res = response();
+  await controller.sendOTP(req, res);
+
+  assert.equal(res.code, 403);
+  assert.equal(providerCalls.length, 0);
+});
+
 test("send-otp goes to the provider when no limit is hit", async () => {
   const providerCalls = [];
   const session = { phone: "9876543210", sendCount: 0, status: "pending", firstSentAt: new Date(), save: async () => {} };

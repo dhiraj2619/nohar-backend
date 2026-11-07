@@ -54,6 +54,24 @@ const RECAPTCHA_WEB_SITE_KEY = process.env.RECAPTCHA_WEB_SITE_KEY;
 const RECAPTCHA_MIN_SCORE = Number.parseFloat(process.env.RECAPTCHA_MIN_SCORE) || 0.5;
 // Keep "false" until most users run an app/website version that sends tokens.
 const RECAPTCHA_REQUIRED = process.env.RECAPTCHA_REQUIRED === "true";
+// When Google cannot be reached, OTP sends are refused. Set "true" only as a
+// short emergency switch during a Google outage.
+const RECAPTCHA_FAIL_OPEN = process.env.RECAPTCHA_FAIL_OPEN === "true";
+// Optional. When set, tokens minted for any other app or website are refused.
+const RECAPTCHA_ANDROID_PACKAGE_NAME =
+  String(process.env.RECAPTCHA_ANDROID_PACKAGE_NAME || "").trim() || null;
+const RECAPTCHA_WEB_HOSTNAMES = String(process.env.RECAPTCHA_WEB_HOSTNAMES || "")
+  .split(",")
+  .map((host) => host.trim().toLowerCase())
+  .filter(Boolean);
+
+// Cloudflare adds this secret as a request header (Transform Rule). A request
+// carrying it came through Cloudflare, so its CF-Connecting-IP can be trusted.
+const CLOUDFLARE_ORIGIN_SECRET =
+  String(process.env.CLOUDFLARE_ORIGIN_SECRET || "").trim() || null;
+// "true" refuses every API request that did not come through Cloudflare.
+// Leave it off until the app and website use the Cloudflare domain.
+const CLOUDFLARE_ORIGIN_ENFORCE = process.env.CLOUDFLARE_ORIGIN_ENFORCE === "true";
 
 module.exports = {
   PORT,
@@ -97,4 +115,9 @@ module.exports = {
   RECAPTCHA_WEB_SITE_KEY,
   RECAPTCHA_MIN_SCORE,
   RECAPTCHA_REQUIRED,
+  RECAPTCHA_FAIL_OPEN,
+  RECAPTCHA_ANDROID_PACKAGE_NAME,
+  RECAPTCHA_WEB_HOSTNAMES,
+  CLOUDFLARE_ORIGIN_SECRET,
+  CLOUDFLARE_ORIGIN_ENFORCE,
 };

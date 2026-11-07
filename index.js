@@ -11,7 +11,10 @@ const {
   CLOUDINARY_NAME,
   CLOUDINARY_API_KEY,
   CLOUDINARY_API_SECRET,
+  CLOUDFLARE_ORIGIN_SECRET,
+  CLOUDFLARE_ORIGIN_ENFORCE,
 } = require("./config/config");
+const { createCloudflareEdgeGuard } = require("./middlewares/cloudflareEdge.middleware");
 const connectTodb = require("./dbconnection");
 const { categoryRouter } = require("./routes/category.route");
 const { collectionRouter } = require("./routes/collection.route");
@@ -68,6 +71,15 @@ app.get("/privacy-policy", (req, res) => {
 app.get("/delete-account", (req, res) => {
   res.sendFile(path.join(__dirname, "public", "delete-account.html"));
 });
+
+// Everything below this line must arrive through Cloudflare. The public pages
+// above stay reachable directly, because Play Store listings link to them.
+app.use(
+  createCloudflareEdgeGuard({
+    secret: CLOUDFLARE_ORIGIN_SECRET,
+    enforce: CLOUDFLARE_ORIGIN_ENFORCE,
+  }),
+);
 
 app.use("/api/v1/categories", categoryRouter);
 app.use("/api/v1/collections", collectionRouter);

@@ -263,13 +263,19 @@ const resolveOtpSourceContext = (req) => {
       "",
   ).trim();
   const userAgent = String(req.headers?.["user-agent"] || "").trim().slice(0, 255) || null;
-  // Railway's edge sets X-Real-IP itself. The API is not behind Cloudflare, so
-  // callers can put any value in cf-connecting-ip and x-forwarded-for, which
-  // would let them dodge IP limits or get someone else's IP blocked.
+  // CF-Connecting-IP is trusted only when the edge guard confirmed the request
+  // came through our Cloudflare zone (Cloudflare overwrites that header). On a
+  // direct request a caller could put any value there, or in x-forwarded-for,
+  // to dodge IP limits or get someone else's IP blocked, so Railway's own
+  // X-Real-IP is used instead.
+  const cloudflareIp = req.viaCloudflareEdge === true
+    ? String(req.headers?.["cf-connecting-ip"] || "").trim()
+    : "";
   const railwayIp = String(req.headers?.["x-real-ip"] || "").trim();
   const ipAddress =
     normalizeRequestIp(
-      railwayIp ||
+      cloudflareIp ||
+        railwayIp ||
         req.ip ||
         req.socket?.remoteAddress ||
         req.connection?.remoteAddress ||
