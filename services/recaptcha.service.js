@@ -135,6 +135,29 @@ const verifySendOtpRecaptcha = async ({ token, source, phone, ipAddress }) => {
   return result;
 };
 
+// The real app sends null when it cannot get a token, which counts as
+// token_missing. A malformed token therefore means a script, not a customer.
+const hasRecentMalformedTokens = async (ipAddress, since) => {
+  if (!ipAddress) {
+    return false;
+  }
+
+  try {
+    const found = await RecaptchaCheck.exists({
+      ipAddress,
+      allowed: false,
+      reason: "invalid_token_MALFORMED",
+      createdAt: { $gte: since },
+    });
+
+    return Boolean(found);
+  } catch (error) {
+    console.error("reCAPTCHA malformed token lookup failed:", error.message);
+    return false;
+  }
+};
+
 module.exports = {
   verifySendOtpRecaptcha,
+  hasRecentMalformedTokens,
 };

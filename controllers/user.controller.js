@@ -21,7 +21,10 @@ const OtpAction = require("../models/otpAction.model");
 const OtpBlockedIp = require("../models/otpBlockedIp.model");
 const User = require("../models/users.model");
 const { creditSignupBonus, getPointBalance } = require("../services/rewards.service");
-const { verifySendOtpRecaptcha } = require("../services/recaptcha.service");
+const {
+  verifySendOtpRecaptcha,
+  hasRecentMalformedTokens,
+} = require("../services/recaptcha.service");
 const { activeBlockFilter } = require("../utils/otpBlockFilter");
 const { getCloudflareRelayReason } = require("../utils/otpBotGuard");
 
@@ -668,25 +671,54 @@ const claimOtpSendSlot = async (phone, now) => {
   };
 };
 
-const sendOtpRateLimitResponse = async ({ res, actionType, phone, sourceContext, traceId, now, violation }) => {
+const RECAPTCHA_FAILED_RESPONSE = {
+  success: false,
+  code: "RECAPTCHA_FAILED",
+  message: "Unable to verify your request. Please try again.",
+};
+
+const sendOtpRateLimitResponse = async ({
+  res,
+  actionType,
+  phone,
+  sourceContext,
+  traceId,
+  now,
+  violation,
+  hideLimit = false,
+}) => {
   logOtpEvent(`${actionType}:rate_limited`, {
     traceId,
     source: sourceContext.source,
     phone: maskPhone(phone),
     sourceIpAddress: sourceContext.sourceIpAddress,
     reason: violation.reason,
+    hideLimit,
   });
 
-  await recordOtpAction({
-    phone,
-    actionType,
-    sourceContext,
-    traceId,
-    deliveryStatus: "rate_limited",
-    status: "rate_limited",
-    failureReason: violation.message,
-    providerResponse: { rateLimited: true, reason: violation.reason },
-  });
+  // A script retrying a rejected request would otherwise add a row per hit.
+  const logKey = `rate_limit:${actionType}:${violation.reason}:${sourceContext.sourceIpAddress || "-"}:${phone}`;
+
+  if (shouldLogRepeatBlock(logKey, now.getTime())) {
+    await recordOtpAction({
+      phone,
+      actionType,
+      sourceContext,
+      traceId,
+      deliveryStatus: "rate_limited",
+      status: "rate_limited",
+      failureReason: violation.message,
+      providerResponse: { rateLimited: true, reason: violation.reason, hideLimit },
+    });
+  }
+
+  // A Retry-After tells a script exactly how long to sleep before its next
+  // burst. A caller already sending fake tokens gets the plain reCAPTCHA
+  // failure instead, so it cannot tell that a limit applies or when it lifts.
+  if (hideLimit) {
+    res.status(403).json(RECAPTCHA_FAILED_RESPONSE);
+    return;
+  }
 
   res.set("Retry-After", String(violation.retryAfterSeconds));
   res.status(429).json({
@@ -712,7 +744,25 @@ const rejectIfOtpRateLimited = async ({ res, actionType, phone, sourceContext, t
     return false;
   }
 
-  await sendOtpRateLimitResponse({ res, actionType, phone, sourceContext, traceId, now, violation });
+  // Only the IP limit is hidden. Per-number limits keep their message, since a
+  // real customer on a shared mobile IP needs to know when to try again.
+  const hideLimit =
+    violation.reason === "ip_hourly_limit" &&
+    (await hasRecentMalformedTokens(
+      sourceContext.sourceIpAddress,
+      new Date(now.getTime() - ONE_HOUR_MS),
+    ));
+
+  await sendOtpRateLimitResponse({
+    res,
+    actionType,
+    phone,
+    sourceContext,
+    traceId,
+    now,
+    violation,
+    hideLimit,
+  });
 
   return true;
 };
@@ -765,11 +815,7 @@ const rejectIfRecaptchaFailed = async ({ req, res, actionType, phone, sourceCont
     providerResponse: { recaptcha: result },
   });
 
-  res.status(403).json({
-    success: false,
-    code: "RECAPTCHA_FAILED",
-    message: "Unable to verify your request. Please try again.",
-  });
+  res.status(403).json(RECAPTCHA_FAILED_RESPONSE);
 
   return true;
 };

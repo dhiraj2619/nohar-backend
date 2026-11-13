@@ -10,6 +10,8 @@ const load = ({
   config = {},
   tokenProperties = { valid: true, action: "send_otp" },
   googleError = null,
+  existsFilters = [],
+  existsResult = null,
 } = {}) => {
   const modules = {
     axios: {
@@ -30,7 +32,10 @@ const load = ({
       RECAPTCHA_REQUIRED: required,
       ...config,
     },
-    "../models/recaptchaCheck.model": { create: async (doc) => { checks.push(doc); } },
+    "../models/recaptchaCheck.model": {
+      create: async (doc) => { checks.push(doc); },
+      exists: async (filter) => { existsFilters.push(filter); return existsResult; },
+    },
   };
   const context = { module: { exports: {} }, require: (name) => modules[name], console, Number, Boolean };
   vm.runInNewContext(fs.readFileSync(require.resolve("../services/recaptcha.service"), "utf8"), context);
@@ -173,4 +178,26 @@ test("a website token from another hostname is refused", async () => {
 
   assert.equal((await other.verifySendOtpRecaptcha({ token: TOKEN, source: "website" })).reason, "hostname_mismatch");
   assert.equal((await ours.verifySendOtpRecaptcha({ token: TOKEN, source: "website" })).allowed, true);
+});
+
+test("hasRecentMalformedTokens looks only for malformed-token failures from that IP since the given time", async () => {
+  const existsFilters = [];
+  const since = new Date("2026-11-13T00:00:00Z");
+  const { hasRecentMalformedTokens } = load({ existsFilters, existsResult: { _id: "x" } });
+
+  assert.equal(await hasRecentMalformedTokens("148.113.1.25", since), true);
+  assert.equal(existsFilters.length, 1);
+  assert.equal(existsFilters[0].ipAddress, "148.113.1.25");
+  assert.equal(existsFilters[0].allowed, false);
+  assert.equal(existsFilters[0].reason, "invalid_token_MALFORMED");
+  assert.equal(existsFilters[0].createdAt.$gte, since);
+});
+
+test("hasRecentMalformedTokens is false with no IP or no match", async () => {
+  const existsFilters = [];
+  const { hasRecentMalformedTokens } = load({ existsFilters, existsResult: null });
+
+  assert.equal(await hasRecentMalformedTokens(null, new Date()), false);
+  assert.equal(existsFilters.length, 0);
+  assert.equal(await hasRecentMalformedTokens("1.2.3.4", new Date()), false);
 });

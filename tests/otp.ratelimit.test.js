@@ -25,6 +25,7 @@ const load = ({
   providerCalls = [],
   recaptcha = { allowed: true, reason: "passed" },
   recaptchaCalls = [],
+  malformedTokenIps = [],
   blockedIpFilters = [],
   providerResponse = { status: 200, data: { return: true, request_id: "r1" } },
 }) => {
@@ -42,6 +43,7 @@ const load = ({
     "../services/rewards.service": {},
     "../services/recaptcha.service": {
       verifySendOtpRecaptcha: async (args) => { recaptchaCalls.push(args); return recaptcha; },
+      hasRecentMalformedTokens: async (ip) => malformedTokenIps.includes(ip),
     },
   };
   const context = { module: { exports: {} }, require: (name) => modules[name], console: { ...console, info: () => {} }, Date, Promise };
@@ -233,6 +235,69 @@ test("send-otp does not call reCAPTCHA once an IP has hit its hourly request lim
 
   assert.equal(res.code, 429);
   assert.equal(recaptchaCalls.length, 0);
+});
+
+test("an IP that sent malformed tokens gets a plain reCAPTCHA failure, not the wait time", async () => {
+  const recaptchaCalls = [];
+  const controller = load({
+    recaptchaCalls,
+    malformedTokenIps: ["1.2.3.4"],
+    otpAction: { countDocuments: async (filter) => (filter.sourceIpAddress ? 60 : 0) },
+  });
+
+  const res = response();
+  await controller.sendOTP(request(), res);
+
+  assert.equal(res.code, 403);
+  assert.equal(res.body.code, "RECAPTCHA_FAILED");
+  assert.equal(res.body.retryAfterSeconds, undefined);
+  assert.equal(res.headers["Retry-After"], undefined);
+  assert.equal(recaptchaCalls.length, 0);
+});
+
+test("an IP without malformed tokens still gets the wait time at the hourly limit", async () => {
+  const controller = load({
+    malformedTokenIps: ["9.9.9.9"],
+    otpAction: { countDocuments: async (filter) => (filter.sourceIpAddress ? 60 : 0) },
+  });
+
+  const res = response();
+  await controller.sendOTP(request(), res);
+
+  assert.equal(res.code, 429);
+  assert.equal(res.headers["Retry-After"], "3600");
+});
+
+test("a per-number limit keeps its message even for an IP that sent malformed tokens", async () => {
+  const controller = load({
+    malformedTokenIps: ["1.2.3.4"],
+    otpAction: { countDocuments: async (filter) => (filter.phone ? 10 : 0) },
+  });
+
+  const res = response();
+  await controller.sendOTP(request(), res);
+
+  assert.equal(res.code, 429);
+  assert.equal(res.body.code, "OTP_LIMIT_REACHED");
+});
+
+test("repeated rate-limited requests from one IP for one number are logged once per 10 minutes", async () => {
+  const created = [];
+  const controller = load({
+    malformedTokenIps: ["1.2.3.4"],
+    otpAction: {
+      create: async (doc) => { created.push(doc); },
+      countDocuments: async (filter) => (filter.sourceIpAddress ? 60 : 0),
+    },
+  });
+
+  for (let i = 0; i < 5; i += 1) {
+    await controller.sendOTP(request(), response());
+  }
+
+  assert.equal(created.length, 1);
+  assert.equal(created[0].deliveryStatus, "rate_limited");
+  assert.equal(created[0].providerResponse.hideLimit, true);
 });
 
 test("resend-otp does not call reCAPTCHA once an IP has hit its hourly request limit", async () => {
