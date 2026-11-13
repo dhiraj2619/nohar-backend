@@ -804,16 +804,28 @@ const rejectIfRecaptchaFailed = async ({ req, res, actionType, phone, sourceCont
     return false;
   }
 
-  await recordOtpAction({
-    phone,
-    actionType,
-    sourceContext,
-    traceId,
-    deliveryStatus: "blocked",
-    status: "blocked",
-    failureReason: `recaptcha_${result.reason}`,
-    providerResponse: { recaptcha: result },
-  });
+  // A malformed token is rejected before Google is called, so it costs
+  // nothing, but a script repeating it would add a row per hit. Log it once
+  // per IP and number every 10 minutes. Every hit is still kept in
+  // RecaptchaCheck for the counts and the malformed-token lookup.
+  const shouldRecord =
+    result.reason !== "invalid_token_MALFORMED" ||
+    shouldLogRepeatBlock(
+      `recaptcha_malformed:${actionType}:${sourceContext.sourceIpAddress || "-"}:${phone}`,
+    );
+
+  if (shouldRecord) {
+    await recordOtpAction({
+      phone,
+      actionType,
+      sourceContext,
+      traceId,
+      deliveryStatus: "blocked",
+      status: "blocked",
+      failureReason: `recaptcha_${result.reason}`,
+      providerResponse: { recaptcha: result },
+    });
+  }
 
   res.status(403).json(RECAPTCHA_FAILED_RESPONSE);
 

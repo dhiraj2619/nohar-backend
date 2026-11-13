@@ -449,3 +449,35 @@ test("repeated app-update blocks for one number are logged once per 10 minutes",
 
   assert.equal(created.length, 1);
 });
+
+test("repeated malformed reCAPTCHA tokens from one IP for one number are logged once per 10 minutes", async () => {
+  const created = [];
+  const controller = load({
+    recaptcha: { allowed: false, reason: "invalid_token_MALFORMED" },
+    otpAction: { create: async (row) => { created.push(row); } },
+  });
+
+  for (let i = 0; i < 5; i += 1) {
+    const res = response();
+    await controller.sendOTP(request("148.113.1.25"), res);
+    assert.equal(res.code, 403);
+    assert.equal(res.body.code, "RECAPTCHA_FAILED");
+  }
+
+  assert.equal(created.length, 1);
+  assert.equal(created[0].failureReason, "recaptcha_invalid_token_MALFORMED");
+});
+
+test("other reCAPTCHA failures are still logged on every hit", async () => {
+  const created = [];
+  const controller = load({
+    recaptcha: { allowed: false, reason: "low_score", score: 0.1 },
+    otpAction: { create: async (row) => { created.push(row); } },
+  });
+
+  for (let i = 0; i < 3; i += 1) {
+    await controller.sendOTP(request("5.5.5.5"), response());
+  }
+
+  assert.equal(created.length, 3);
+});
