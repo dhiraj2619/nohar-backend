@@ -128,7 +128,12 @@ const createWhatsAppLeadController = async (req, res) => {
 
 const getLeads = async (req, res) => {
   try {
-    await markStaleCartsAbandoned(process.env.CART_ABANDON_MINUTES || 60);
+    // Housekeeping write; a failed write (e.g. storage quota) must not hide the leads.
+    try {
+      await markStaleCartsAbandoned(process.env.CART_ABANDON_MINUTES || 60);
+    } catch (staleError) {
+      console.error("Marking stale carts abandoned failed:", staleError.message);
+    }
     const { page, limit, skip } = getPagination(req.query);
     const filter = {};
 

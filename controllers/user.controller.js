@@ -405,12 +405,16 @@ const rejectIfBlockedOtpIp = async (req, res, actionType) => {
     },
   );
 
-  await recordBlockedOtpAttempt({
-    actionType,
-    phone: normalizeAuthPhone(req.body),
-    sourceContext,
-    reason,
-  });
+  // matchCount above keeps the exact total; the OTP Actions log only needs a
+  // sample, or a blocked bot looping on one IP fills the database.
+  if (shouldLogRepeatBlock(`ip:${sourceIpAddress}`)) {
+    await recordBlockedOtpAttempt({
+      actionType,
+      phone: normalizeAuthPhone(req.body),
+      sourceContext,
+      reason,
+    });
+  }
 
   return {
     blocked: true,
